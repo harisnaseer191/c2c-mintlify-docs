@@ -1,0 +1,447 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "C2C Merchant API",
+    "description": "API for merchants to create payment orders, check order status, and query balance on the C2C Platform.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "C2C Support",
+      "email": "support@c2cplatform.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key",
+        "description": "Your merchant API key in the format `mk_live_xxxx`. Pass it as a Bearer token.",
+        "x-default": "mk_live_your_api_key_here"
+      }
+    },
+    "schemas": {
+      "CreateOrderRequest": {
+        "type": "object",
+        "required": ["orderType", "amount", "walletType"],
+        "properties": {
+          "orderType": {
+            "type": "string",
+            "enum": ["Deposit", "Withdrawal"],
+            "description": "Type of order to create.",
+            "example": "Deposit"
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Order amount in PKR. Must be a positive value within your configured pay/draw limits.",
+            "example": 1500.00
+          },
+          "currency": {
+            "type": "string",
+            "default": "PKR",
+            "description": "Currency code. Currently only PKR is supported.",
+            "example": "PKR"
+          },
+          "walletType": {
+            "type": "string",
+            "enum": ["JazzCash", "Easypaisa", "TillID", "BankAccount"],
+            "description": "The wallet type the customer will use to send or receive money. Required — the platform selects an available member who has an approved account of this wallet type.",
+            "example": "JazzCash"
+          },
+          "merchantOrderRef": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 200,
+            "description": "Your own reference number for this order (e.g. your internal order ID). Returned in status responses and webhook payloads.",
+            "example": "ORD-20260618-7890"
+          },
+          "customerAccountNumber": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 50,
+            "description": "**Required for Withdrawal orders.** The customer's wallet account number that the assigned member will send money to.",
+            "example": "03211234567"
+          },
+          "customerReference": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 200,
+            "description": "Your internal customer identifier for reference and filtering.",
+            "example": "player_12345"
+          },
+          "callbackUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "maxLength": 500,
+            "description": "HTTPS URL that receives a signed webhook POST when the order completes or fails. See the [Webhooks guide](/webhooks) for payload shapes and signature verification.",
+            "example": "https://yoursite.com/webhooks/c2c"
+          },
+          "successUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "maxLength": 500,
+            "description": "URL the payment page redirects the customer to after a successful payment. If omitted, the payment page shows a generic success screen.",
+            "example": "https://yoursite.com/payment/success"
+          },
+          "failureUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "maxLength": 500,
+            "description": "URL the payment page redirects the customer to if the payment is rejected or expires. If omitted, the payment page shows a generic failure screen.",
+            "example": "https://yoursite.com/payment/failed"
+          },
+          "metadata": {
+            "type": "string",
+            "nullable": true,
+            "description": "Arbitrary string (e.g. JSON) you can attach to the order for your own reference. Not displayed to customers or members.",
+            "example": "{\"userId\": 42, \"gameId\": \"galaxy-conquest\"}"
+          },
+          "txnRefDigitsRequired": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 8,
+            "default": 4,
+            "description": "Number of trailing digits from the wallet transaction ID that the customer must enter on the payment page. Allowed range: 4–8. Defaults to 4.",
+            "example": 4
+          },
+          "maxRetryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 3,
+            "description": "Maximum number of times the customer can re-submit a transaction reference after a member rejection. When retries are exhausted the order moves to ManualReview. Allowed range: 0–10. Defaults to 3.",
+            "example": 3
+          }
+        }
+      },
+      "CreateOrderResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "orderId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Unique order identifier. Use this to poll status or in webhook matching.",
+                "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              },
+              "orderReference": {
+                "type": "string",
+                "description": "Platform-generated human-readable order reference.",
+                "example": "C2C-20260618-001234"
+              },
+              "paymentPageUrl": {
+                "type": "string",
+                "format": "uri",
+                "description": "Signed URL to redirect your customer to. The payment page displays the assigned member's account number and collects the customer's transaction reference. Expires at `expiresAt`.",
+                "example": "https://payment.c2cplatform.com/pay?order_id=a1b2c3d4&signature=abc123&expires=1750291234"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["Queued", "AwaitingCustomerPayment", "AwaitingMemberConfirmation", "AwaitingMemberPayout", "Completed", "Confirmed", "Rejected", "Cancelled", "Expired", "ManualReview"],
+                "description": "Initial status. Newly created deposit orders start as `Queued`; withdrawal orders start as `AwaitingMemberPayout`.",
+                "example": "Queued"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "UTC timestamp when the payment page URL expires (15 minutes from creation). After this time the order moves to `Expired` if the customer has not submitted a transaction reference.",
+                "example": "2026-06-18T15:00:00Z"
+              }
+            }
+          }
+        }
+      },
+      "OrderStatusResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "orderId": { "type": "string", "format": "uuid" },
+              "orderReference": { "type": "string", "example": "C2C-20260618-001234" },
+              "status": {
+                "type": "string",
+                "enum": ["Queued", "AwaitingCustomerPayment", "AwaitingMemberConfirmation", "AwaitingMemberPayout", "Completed", "Confirmed", "Rejected", "Cancelled", "CancelledAuto", "Expired", "ManualReview"],
+                "description": "Current status of the order. See the status lifecycle table in the server integration guide.",
+                "example": "Completed"
+              },
+              "amount": {
+                "type": "number",
+                "format": "decimal",
+                "description": "Order amount in PKR.",
+                "example": 1500.00
+              },
+              "queuedAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the order entered the queue (UTC).",
+                "example": "2026-06-18T14:30:00Z"
+              },
+              "confirmedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true,
+                "description": "When the order was confirmed (UTC). Null if not yet confirmed.",
+                "example": "2026-06-18T14:35:22Z"
+              },
+              "cancelledAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true,
+                "description": "When the order was cancelled (UTC). Null for non-cancelled orders."
+              }
+            }
+          }
+        }
+      },
+      "BalanceResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "balance": {
+                "type": "number",
+                "format": "decimal",
+                "description": "Current platform balance in PKR.",
+                "example": 25000.00
+              },
+              "frozenBalance": {
+                "type": "number",
+                "format": "decimal",
+                "description": "Balance temporarily frozen due to pending orders.",
+                "example": 1500.00
+              },
+              "currency": {
+                "type": "string",
+                "example": "PKR"
+              }
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": {
+            "type": "string",
+            "description": "Human-readable error description.",
+            "example": "Idempotency-Key header is required."
+          },
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code.",
+            "example": "IDEMPOTENCY_KEY_MISSING"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "orders",
+      "description": "Create and manage payment orders"
+    },
+    {
+      "name": "balance",
+      "description": "Query your merchant balance"
+    }
+  ],
+  "paths": {
+    "/api/merchant/orders": {
+      "post": {
+        "tags": ["orders"],
+        "summary": "Create an order",
+        "description": "Creates a new payment order. The platform automatically selects an eligible online member whose account matches the requested `walletType`. Returns a signed payment page URL to redirect your customer to — the page displays the assigned member's account number and collects the customer's last-4-digit transaction reference.\n\n**Deposit orders**: The customer sends money to the displayed account, then submits the last 4 digits of their transaction ID (and optionally a receipt image) on the payment page. The assigned member then verifies and approves or rejects the order.\n\n**Withdrawal orders**: The assigned member sends money to `customerAccountNumber`, then confirms with the last 4 digits of their outbound transaction.\n\n**Important**: You must include the `Idempotency-Key` header to prevent duplicate orders. The `walletType` field is required.",
+        "operationId": "createOrder",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "order_game_abc123xyz"
+            },
+            "description": "A unique key for this request. If you retry with the same key, the original order is returned without creating a duplicate."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateOrderRequest" },
+              "examples": {
+                "deposit": {
+                  "summary": "Deposit order (customer sends to member account)",
+                  "value": {
+                    "orderType": "Deposit",
+                    "amount": 1500.00,
+                    "currency": "PKR",
+                    "walletType": "JazzCash",
+                    "merchantOrderRef": "ORD-20260618-7890",
+                    "customerReference": "player_12345",
+                    "callbackUrl": "https://yoursite.com/webhooks/c2c",
+                    "successUrl": "https://yoursite.com/payment/success",
+                    "failureUrl": "https://yoursite.com/payment/failed"
+                  }
+                },
+                "withdrawal": {
+                  "summary": "Withdrawal order (member sends to customer account)",
+                  "value": {
+                    "orderType": "Withdrawal",
+                    "amount": 2000.00,
+                    "currency": "PKR",
+                    "walletType": "Easypaisa",
+                    "merchantOrderRef": "WITHDRAW-20260618-0042",
+                    "customerAccountNumber": "03211234567",
+                    "customerReference": "player_12345",
+                    "callbackUrl": "https://yoursite.com/webhooks/c2c"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order created successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateOrderResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or missing Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "No eligible member available for this wallet type and amount",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": {
+                  "success": false,
+                  "error": "No eligible member is currently available for this order.",
+                  "code": "NO_ELIGIBLE_MEMBER"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (100 requests/minute)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/merchant/orders/{id}/status": {
+      "get": {
+        "tags": ["orders"],
+        "summary": "Get order status",
+        "description": "Returns the current status of an order. Poll this endpoint every 3–5 seconds after creating an order to detect when it is confirmed or rejected.\n\n**Status values**:\n- `Pending` — waiting for the customer to submit their transaction reference on the payment page\n- `Confirmed` — the assigned member verified receipt of funds and approved the order\n- `Rejected` — the assigned member did not receive the payment and rejected the order; prompt the customer to retry\n- `Expired` — the order timed out without confirmation",
+        "operationId": "getOrderStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The `orderId` returned when you created the order.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order status retrieved",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OrderStatusResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Order not found or does not belong to this API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/merchant/orders/balance": {
+      "get": {
+        "tags": ["balance"],
+        "summary": "Get balance",
+        "description": "Returns the current platform balance associated with your API key, including any frozen amount from pending orders.",
+        "operationId": "getBalance",
+        "responses": {
+          "200": {
+            "description": "Balance retrieved",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BalanceResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

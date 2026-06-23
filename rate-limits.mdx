@@ -1,0 +1,60 @@
+---
+title: "Rate Limits"
+description: "The C2C Merchant API enforces rate limits to ensure fair usage across all merchants."
+---
+
+# Rate Limits
+
+The API applies a fixed window rate limit per API key.
+
+## Limits
+
+| Limit | Value |
+|-------|-------|
+| Requests per minute | **100** |
+| Window | Fixed (resets every 60 seconds) |
+| Scope | Per API key |
+
+## Rate limit headers
+
+Every response includes the following headers:
+
+| Header | Description |
+|--------|-------------|
+| `X-RateLimit-Limit` | Maximum requests allowed per window |
+| `X-RateLimit-Remaining` | Requests remaining in the current window |
+| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+
+## Handling 429 responses
+
+When you exceed the limit, the API returns `429 Too Many Requests`:
+
+```json
+{
+  "success": false,
+  "error": "Rate limit exceeded. Maximum 100 requests per minute.",
+  "code": "RATE_LIMIT_EXCEEDED"
+}
+```
+
+Implement exponential backoff when you receive a `429`:
+
+```javascript
+async function fetchWithBackoff(url, options, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const response = await fetch(url, options);
+
+    if (response.status !== 429) return response;
+
+    const retryAfter = parseInt(response.headers.get('Retry-After') ?? '60', 10);
+    await new Promise(r => setTimeout(r, retryAfter * 1000));
+  }
+  throw new Error('Max retries exceeded');
+}
+```
+
+## Best practices
+
+- **Poll at 5-second intervals** — avoid hammering the status endpoint
+- **Batch where possible** — create orders in sequence, not bursts
+- **Use idempotency keys** — safe retries without burning your rate limit on duplicates

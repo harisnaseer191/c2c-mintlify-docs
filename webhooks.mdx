@@ -1,0 +1,213 @@
+---
+title: "Webhooks"
+description: "Receive real-time HTTP callbacks when orders are completed or failed."
+---
+
+# Webhooks
+
+The C2C Platform delivers signed HTTP callbacks to a URL you provide when creating an order.
+Set `callbackUrl` in your `POST /api/merchant/orders` request and your endpoint receives a
+`POST` with the order result as soon as it is resolved.
+
+## How it works
+
+1. Include `callbackUrl` in your order creation request
+2. When the order completes or fails, the platform `POST`s a signed JSON payload to your URL
+3. Your endpoint verifies the HMAC-SHA256 signature and processes the event
+4. If your endpoint does not respond with `2xx`, the platform retries with exponential backoff
+
+## Setting a callback URL
+
+```json
+{
+  "orderType": "Deposit",
+  "amount": 1500.00,
+  "currency": "PKR",
+  "walletType": "JazzCash",
+  "merchantOrderRef": "ORD-001",
+  "callbackUrl": "https://yoursite.com/webhooks/c2c"
+}
+```
+
+<Warning>
+  Your callback URL must be an HTTPS endpoint reachable from the internet.
+  The platform does not retry to unreachable hosts indefinitely — ensure your server is available.
+</Warning>
+
+## Event types
+
+| Event | Trigger |
+|-------|---------|
+| `order.completed` | Order confirmed successfully — safe to fulfil the purchase |
+| `order.failed` | Order rejected, cancelled, or expired — do not fulfil |
+
+## Webhook payload
+
+### order.completed
+
+```json
+{
+  "eventType": "order.completed",
+  "orderId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "orderReference": "C2C-20260618-001234",
+  "merchantOrderRef": "ORD-001",
+  "amount": 1500.00,
+  "currency": "PKR",
+  "status": "Completed",
+  "completedAt": "2026-06-18T14:35:22Z",
+  "timestamp": "2026-06-18T14:35:22Z"
+}
+```
+
+### order.failed
+
+```json
+{
+  "eventType": "order.failed",
+  "orderId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "orderReference": "C2C-20260618-001234",
+  "merchantOrderRef": "ORD-001",
+  "amount": 1500.00,
+  "currency": "PKR",
+  "status": "Rejected",
+  "reason": "Member did not receive payment.",
+  "timestamp": "2026-06-18T14:40:00Z"
+}
+```
+
+## Verifying the signature
+
+Every webhook request includes two headers:
+
+| Header | Value |
+|--------|-------|
+| `X-C2C-Signature` | `sha256=<hmac-sha256-hex>` |
+| `X-C2C-Event` | `order.completed` or `order.failed` |
+
+The signature is an HMAC-SHA256 of the raw request body, keyed with your **webhook signing secret**.
+Contact your C2C admin to obtain your signing secret.
+
+**Verification examples**
+
+<CodeGroup>
+
+```javascript Node.js
+const crypto = require('crypto');
+
+function verifyWebhook(rawBody, signatureHeader, signingSecret) {
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', signingSecret)
+    .update(rawBody, 'utf8')
+    .digest('hex');
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signatureHeader),
+    Buffer.from(expected)
+  );
+}
+
+// Express example
+app.post('/webhooks/c2c', express.raw({ type: 'application/json' }), (req, res) => {
+  const signature = req.headers['x-c2c-signature'];
+  if (!verifyWebhook(req.body, signature, process.env.C2C_WEBHOOK_SECRET)) {
+    return res.status(401).send('Invalid signature');
+  }
+
+  const event = JSON.parse(req.body);
+  if (event.eventType === 'order.completed') {
+    // Fulfil the order
+  }
+
+  res.sendStatus(200);
+});
+```
+
+```python Python
+import hmac, hashlib
+
+def verify_webhook(raw_body: bytes, signature_header: str, signing_secret: str) -> bool:
+    expected = 'sha256=' + hmac.new(
+        signing_secret.encode(), raw_body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature_header, expected)
+
+# Flask example
+from flask import Flask, request, abort
+import os, json
+
+app = Flask(__name__)
+
+@app.route('/webhooks/c2c', methods=['POST'])
+def webhook():
+    raw_body = request.get_data()
+    signature = request.headers.get('X-C2C-Signature', '')
+    if not verify_webhook(raw_body, signature, os.environ['C2C_WEBHOOK_SECRET']):
+        abort(401)
+
+    event = json.loads(raw_body)
+    if event['eventType'] == 'order.completed':
+        pass  # fulfil order
+
+    return '', 200
+```
+
+```php PHP
+function verifyWebhook(string $rawBody, string $signatureHeader, string $signingSecret): bool {
+    $expected = 'sha256=' . hash_hmac('sha256', $rawBody, $signingSecret);
+    return hash_equals($expected, $signatureHeader);
+}
+
+$rawBody = file_get_contents('php://input');
+$signature = $_SERVER['HTTP_X_C2C_SIGNATURE'] ?? '';
+
+if (!verifyWebhook($rawBody, $signature, getenv('C2C_WEBHOOK_SECRET'))) {
+    http_response_code(401);
+    exit;
+}
+
+$event = json_decode($rawBody, true);
+if ($event['eventType'] === 'order.completed') {
+    // fulfil order
+}
+
+http_response_code(200);
+```
+
+</CodeGroup>
+
+<Warning>
+  Always verify the signature **before** reading or acting on the payload.
+  Use a constant-time comparison (`timingSafeEqual`, `hmac.compare_digest`, `hash_equals`)
+  to prevent timing attacks.
+</Warning>
+
+## Retry behaviour
+
+If your endpoint returns a non-`2xx` status code or is unreachable, the platform retries
+up to **10 times** using exponential backoff:
+
+| Attempt | Delay after failure |
+|---------|---------------------|
+| 1 | 30 s |
+| 2 | 60 s |
+| 3 | 120 s |
+| 4 | 240 s |
+| 5 | 480 s |
+| … | doubles each time |
+| 10 | ~4 h |
+
+After 10 failed attempts, the delivery is abandoned. Use polling as a fallback for
+orders where you did not receive a webhook.
+
+## Best practices
+
+- **Respond immediately** — return `200` as soon as you validate the signature, then process asynchronously
+- **Make your handler idempotent** — the same event may be delivered more than once due to retries
+- **Use `merchantOrderRef`** — set a unique reference per order so your handler can locate the record quickly
+- **Check `status`** — never fulfil on `order.failed`, even if `eventType` is unexpected
+
+## Polling as a fallback
+
+If you cannot host a public HTTPS endpoint, omit `callbackUrl` and poll
+`GET /api/merchant/orders/{id}/status` every 3–5 seconds instead.
+See the [Server Integration guide](/guides/server-integration) for a complete polling implementation.

@@ -1,0 +1,113 @@
+---
+title: "Error Handling"
+description: "All error responses use standard HTTP status codes with a consistent JSON body."
+---
+
+# Error Handling
+
+All API errors return a JSON body with the following structure:
+
+```json
+{
+  "success": false,
+  "error": "Human-readable error message",
+  "code": "MACHINE_READABLE_CODE"
+}
+```
+
+## HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `400` | Bad request — invalid parameters or missing required fields |
+| `401` | Unauthorized — missing or invalid API key |
+| `404` | Not found — order does not exist or belongs to another merchant |
+| `409` | Conflict — idempotency key already used with different parameters |
+| `422` | Unprocessable — business rule violation (e.g., insufficient balance) |
+| `429` | Too many requests — rate limit exceeded |
+| `500` | Internal server error — contact support |
+
+## Common error codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `UNAUTHORIZED` | 401 | Missing or invalid API key |
+| `IDEMPOTENCY_KEY_MISSING` | 400 | `Idempotency-Key` header not provided |
+| `IDEMPOTENCY_CONFLICT` | 409 | Same key used with different parameters |
+| `ORDER_NOT_FOUND` | 404 | Order ID does not exist or belongs to another merchant |
+| `NO_ELIGIBLE_MEMBER` | 422 | No member is currently online and available for the requested wallet type and amount — retry later |
+| `INSUFFICIENT_BALANCE` | 422 | Merchant balance too low for the requested amount |
+| `RATE_LIMIT_EXCEEDED` | 429 | More than 100 requests per minute |
+| `INVALID_AMOUNT` | 400 | Amount is zero, negative, or exceeds configured limits |
+| `UNSUPPORTED_WALLET` | 400 | Requested wallet type is not currently available |
+
+## Idempotency conflicts
+
+If you reuse an `Idempotency-Key` with different request parameters, you receive a `409`:
+
+```json
+{
+  "success": false,
+  "error": "Idempotency key already used with different parameters.",
+  "code": "IDEMPOTENCY_CONFLICT"
+}
+```
+
+## Rate limit errors
+
+When you exceed the rate limit, retry after 60 seconds:
+
+```json
+{
+  "success": false,
+  "error": "Rate limit exceeded. Maximum 100 requests per minute.",
+  "code": "RATE_LIMIT_EXCEEDED"
+}
+```
+
+## No eligible member (422)
+
+When no member is available for the requested wallet type and amount, the API returns `422`:
+
+```json
+{
+  "success": false,
+  "error": "No eligible member is currently available for this order.",
+  "code": "NO_ELIGIBLE_MEMBER"
+}
+```
+
+This is not a permanent failure — it means all members for this wallet type are offline or at capacity.
+Wait a few minutes and retry with a new idempotency key.
+
+## Recommended error handling
+
+```javascript
+async function createOrderSafe(params) {
+  const response = await fetch('https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'Idempotency-Key': params.idempotencyKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (response.status === 429) {
+    throw new Error('Rate limit hit — retry after 60 seconds');
+  }
+
+  if (response.status === 409) {
+    // Idempotency match — safe to return the existing order
+    return response.json();
+  }
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`${error.code}: ${error.error}`);
+  }
+
+  return response.json();
+}
+```

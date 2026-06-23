@@ -1,0 +1,247 @@
+---
+title: "Server-Side Integration"
+description: "Complete server-side integration guide for the C2C Merchant API — from installation to production."
+---
+
+# Server-Side Integration
+
+This guide walks through a complete backend integration with the C2C Merchant API.
+
+## Prerequisites
+
+- A C2C merchant API key (format: `mk_live_xxxxx`) — obtain from your admin panel
+- A server-side backend (Node.js, Python, PHP, or any language with HTTP support)
+- HTTPS endpoint for receiving order confirmations
+
+## Security rules
+
+<Warning>
+  **Never expose your API key on the client side.** All API calls must be made
+  from your server. The API key grants full access to your merchant account.
+</Warning>
+
+- Store your API key in environment variables, not in code
+- Always use HTTPS for all API requests
+- Validate the `Idempotency-Key` uniqueness in your database before sending
+
+## Integration checklist
+
+<Check>Store the API key in an environment variable (`C2C_API_KEY`)</Check>
+<Check>Generate unique idempotency keys per order (UUID or database ID)</Check>
+<Check>Implement status polling with exponential backoff</Check>
+<Check>Handle all order status values: `Confirmed`, `Rejected`, `Expired`</Check>
+<Check>Never redirect customers to cached or reused payment page URLs</Check>
+
+## Step 1: Set up your environment
+
+Store your API key as an environment variable and never commit it to version control.
+
+```bash
+# .env (add to .gitignore)
+C2C_API_KEY=mk_live_your_api_key_here
+```
+
+## Step 2: Create an order
+
+Call `POST /api/merchant/orders` from your backend with a unique `Idempotency-Key`.
+
+<CodeGroup>
+
+```javascript Node.js
+const crypto = require('crypto');
+
+async function createOrder({ amount, walletType, merchantOrderRef, customerReference }) {
+  const response = await fetch('https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'Idempotency-Key': crypto.randomUUID(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      orderType: 'Deposit',
+      amount,
+      currency: 'PKR',
+      walletType,          // required: 'JazzCash' | 'Easypaisa' | 'TillID' | 'BankAccount'
+      merchantOrderRef,   // optional: your internal order reference
+      customerReference,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error ?? 'Order creation failed');
+  }
+
+  return response.json();
+}
+```
+
+```python Python
+import httpx, os, uuid
+
+def create_order(amount: float, wallet_type: str, merchant_order_ref: str = None, customer_reference: str = None) -> dict:
+    response = httpx.post(
+        'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders',
+        headers={
+            'Authorization': f'Bearer {os.environ["C2C_API_KEY"]}',
+            'Idempotency-Key': str(uuid.uuid4()),
+        },
+        json={
+            'orderType': 'Deposit',
+            'amount': amount,
+            'currency': 'PKR',
+            'walletType': wallet_type,          # required
+            'merchantOrderRef': merchant_order_ref,  # optional
+            'customerReference': customer_reference,
+        },
+    )
+    response.raise_for_status()
+    return response.json()
+```
+
+```php PHP
+function createOrder(float $amount, string $walletType, string $customerReference): array {
+    $ch = curl_init('https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . getenv('C2C_API_KEY'),
+            'Idempotency-Key: ' . bin2hex(random_bytes(16)),
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode([
+            'orderType' => 'Deposit',
+            'amount' => $amount,
+            'currency' => 'PKR',
+            'walletType' => $walletType,   // required: 'JazzCash' | 'Easypaisa' | 'TillID' | 'BankAccount'
+            'customerReference' => $customerReference,
+        ]),
+    ]);
+    $result = json_decode(curl_exec($ch), true);
+    curl_close($ch);
+    return $result;
+}
+```
+
+</CodeGroup>
+
+## Step 3: Redirect the customer
+
+The response contains a `paymentPageUrl`. Redirect your customer to it immediately.
+
+```json
+{
+  "success": true,
+  "data": {
+    "orderId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "orderReference": "C2C-20260618-001234",
+    "paymentPageUrl": "https://payment.c2cplatform.com/pay?order_id=a1b2c3d4&signature=abc123&expires=1750291234",
+    "status": "Queued",
+    "expiresAt": "2026-06-18T15:00:00Z"
+  }
+}
+```
+
+The payment page shows the assigned member's wallet account number and handles collecting the customer's transaction reference (last 4 digits) and optional receipt image. Your server does not need to display any account numbers.
+
+<Warning>
+  The payment page URL expires after **15 minutes**. Redirect the customer
+  immediately — do not cache or reuse these URLs.
+</Warning>
+
+## Step 4: Poll for confirmation
+
+After the customer submits their transaction ID on the payment page, the assigned member verifies the payment in their wallet app and approves or rejects it.
+Poll `GET /api/merchant/orders/{id}/status` from your backend until the order resolves.
+
+Alternatively, set `callbackUrl` in your order creation request to receive a webhook instead of polling.
+See the [Webhooks guide](/webhooks) for details.
+
+```javascript
+async function pollOrderStatus(orderId) {
+  const maxAttempts = 60; // 5 minutes at 5-second intervals
+  const terminalStatuses = new Set(['Completed', 'Confirmed', 'Rejected', 'Cancelled', 'CancelledAuto', 'Expired', 'ManualReview']);
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const response = await fetch(
+      `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/${orderId}/status`,
+      { headers: { Authorization: `Bearer ${process.env.C2C_API_KEY}` } }
+    );
+    const { data } = await response.json();
+
+    if (terminalStatuses.has(data.status)) return data.status;
+
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  return 'timeout';
+}
+```
+
+## Step 5: Fulfil the order
+
+| Status | Meaning | Your action |
+|--------|---------|-------------|
+| `Completed` | Terminal — success | Credit coins / fulfil the purchase |
+| `Confirmed` | Legacy terminal — success | Same as `Completed` |
+| `Rejected` | Terminal — member rejected | Do not fulfil. Prompt the customer to retry with a new order |
+| `Expired` | Terminal — checkout expired | Do not fulfil. Ask the customer to start over |
+| `Cancelled` / `CancelledAuto` | Terminal — cancelled | Do not fulfil. Show an error to the customer |
+| `ManualReview` | Terminal — escalated | Do not fulfil. Contact C2C support with the order reference |
+| `Queued` / `AwaitingCustomerPayment` / `AwaitingMemberConfirmation` / `AwaitingMemberPayout` | In progress | Continue polling |
+
+## Optional order fields
+
+In addition to the required fields, you can set the following when creating an order:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `callbackUrl` | string (HTTPS URL) | — | Webhook endpoint to notify on completion or failure |
+| `successUrl` | string (HTTPS URL) | — | Redirect destination on the payment page after successful payment |
+| `failureUrl` | string (HTTPS URL) | — | Redirect destination on the payment page after failure |
+| `metadata` | string | — | Arbitrary string (e.g. JSON) stored with the order for your own use |
+| `txnRefDigitsRequired` | integer (4–8) | 4 | How many trailing digits of the wallet transaction ID the customer must enter |
+| `maxRetryCount` | integer (0–10) | 3 | Maximum retries before the order escalates to `ManualReview` |
+
+## Error handling
+
+Always handle errors from every API call. The most important non-obvious error is `422 NO_ELIGIBLE_MEMBER`—
+this means no member is currently available for the requested wallet type, and your code should retry after a delay:
+
+```javascript
+async function createOrderWithRetry(params, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const response = await fetch('https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+        'Idempotency-Key': params.idempotencyKey, // same key on every retry attempt
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+
+    // 409 = idempotency match, safe to use the existing order
+    if (response.status === 409 || response.ok) return response.json();
+
+    const error = await response.json();
+
+    if (response.status === 422 && error.code === 'NO_ELIGIBLE_MEMBER') {
+      // No member online right now — wait 30s then retry
+      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 30_000));
+      continue;
+    }
+
+    throw new Error(`${error.code}: ${error.error}`);
+  }
+  throw new Error('No member available after retries');
+}
+```
+
+## Next steps
+
+- [Authentication guide](/authentication) — key rotation and security best practices
+- [Webhooks guide](/webhooks) — real-time callbacks for order completion
+- [Error reference](/errors) — full list of error codes
+- [Rate limits](/rate-limits) — request limits and backoff strategies

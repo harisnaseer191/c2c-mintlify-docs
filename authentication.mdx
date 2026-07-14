@@ -34,6 +34,13 @@ Authorization: Bearer mk_live_your_api_key_here
 Your C2C admin generates an API key for your merchant account.
 The key is shown **once** at generation time. Store it immediately in a secure location.
 
+## Request signing
+
+In addition to your API key, every request must be **signed** with HMAC-SHA256. Your
+**signing secret** (`sksec_...`) is issued once alongside your API key — store it the
+same way you store your API key. See [Request Signing](/signing) for the full algorithm,
+worked example, and multi-language code samples.
+
 ## Key rotation
 
 If your key is compromised, contact your admin immediately. They can revoke the

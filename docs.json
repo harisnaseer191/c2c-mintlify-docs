@@ -1,16 +1,16 @@
 {
   "$schema": "https://mintlify.com/schema.json",
   "name": "C2C Platform",
-  "theme": "linden",
+  "theme": "mint",
   "logo": {
     "dark": "/logo/logo-dark.svg",
     "light": "/logo/logo-light.svg"
   },
   "favicon": "/favicon.svg",
   "colors": {
-    "primary": "#0D9373",
+    "primary": "#16A34A",
     "light": "#07C983",
-    "dark": "#0D9373"
+    "dark": "#15803D"
   },
   "topbarLinks": [
     {
@@ -52,13 +52,27 @@
           },
           {
             "group": "Reference",
-            "pages": ["errors", "rate-limits", "idempotency", "webhooks"]
+            "pages": ["errors", "rate-limits", "idempotency", "webhooks", "signing"]
           }
         ]
       },
       {
         "tab": "API Reference",
-        "openapi": "openapi.json"
+        "openapi": "openapi.json",
+        "groups": [
+          {
+            "group": "Account Balance",
+            "pages": ["GET /api/merchant/orders/balance"]
+          },
+          {
+            "group": "Orders",
+            "pages": ["POST /api/merchant/orders"]
+          },
+          {
+            "group": "Order Status",
+            "pages": ["GET /api/merchant/orders/{id}/status"]
+          }
+        ]
       }
     ]
   },

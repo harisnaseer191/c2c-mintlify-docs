@@ -28,6 +28,22 @@
         "x-default": "mk_live_your_api_key_here"
       }
     },
+    "parameters": {
+      "SignatureTimestampHeader": {
+        "name": "X-C2C-Timestamp",
+        "in": "header",
+        "required": true,
+        "schema": { "type": "integer", "example": 1750000000 },
+        "description": "Unix epoch seconds used to build the request signature. See the [Request Signing](/signing) guide. Requests more than 5 minutes out of sync with the server clock are rejected."
+      },
+      "SignatureSignatureHeader": {
+        "name": "X-C2C-Signature",
+        "in": "header",
+        "required": true,
+        "schema": { "type": "string", "example": "sha256=9439f71c99f229e9edfbfbb5464ffe1fb9b506061b6de9c55d52c88dcd4c18f6" },
+        "description": "`sha256=<hex>` — HMAC-SHA256 of the canonical request string (`timestamp\nMETHOD\npath\nhex(sha256(body))`), keyed with your signing secret. See the [Request Signing](/signing) guide."
+      }
+    },
     "schemas": {
       "CreateOrderRequest": {
         "type": "object",
@@ -257,20 +273,24 @@
   },
   "tags": [
     {
-      "name": "orders",
-      "description": "Create and manage payment orders"
+      "name": "Orders",
+      "description": "Create payment orders"
     },
     {
-      "name": "balance",
+      "name": "Order Status",
+      "description": "Check the status of a payment order"
+    },
+    {
+      "name": "Account Balance",
       "description": "Query your merchant balance"
     }
   ],
   "paths": {
     "/api/merchant/orders": {
       "post": {
-        "tags": ["orders"],
+        "tags": ["Orders"],
         "summary": "Create an order",
-        "description": "Creates a new payment order. The platform automatically selects an eligible online member whose account matches the requested `walletType`. Returns a signed payment page URL to redirect your customer to — the page displays the assigned member's account number and collects the customer's last-4-digit transaction reference.\n\n**Deposit orders**: The customer sends money to the displayed account, then submits the last 4 digits of their transaction ID (and optionally a receipt image) on the payment page. The assigned member then verifies and approves or rejects the order.\n\n**Withdrawal orders**: The assigned member sends money to `customerAccountNumber`, then confirms with the last 4 digits of their outbound transaction.\n\n**Important**: You must include the `Idempotency-Key` header to prevent duplicate orders. The `walletType` field is required.",
+        "description": "Creates a new payment order. The platform automatically selects an eligible online member whose account matches the requested `walletType`. Returns a signed payment page URL to redirect your customer to — the page displays the assigned member's account number and collects the customer's last-4-digit transaction reference.\n\n**Deposit orders**: The customer sends money to the displayed account, then submits the last 4 digits of their transaction ID (and optionally a receipt image) on the payment page. The assigned member then verifies and approves or rejects the order.\n\n**Withdrawal orders**: The assigned member sends money to `customerAccountNumber`, then confirms with the last 4 digits of their outbound transaction.\n\n**Important**: You must include the `Idempotency-Key` header to prevent duplicate orders, and sign every request — see [Request Signing](/signing). The `walletType` field is required.",
         "operationId": "createOrder",
         "parameters": [
           {
@@ -282,7 +302,9 @@
               "example": "order_game_abc123xyz"
             },
             "description": "A unique key for this request. If you retry with the same key, the original order is returned without creating a duplicate."
-          }
+          },
+          { "$ref": "#/components/parameters/SignatureTimestampHeader" },
+          { "$ref": "#/components/parameters/SignatureSignatureHeader" }
         ],
         "requestBody": {
           "required": true,
@@ -339,10 +361,20 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key",
+            "description": "Missing/invalid API key (`UNAUTHORIZED`), or missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`) — see [Request Signing](/signing)",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "examples": {
+                  "invalidApiKey": {
+                    "summary": "Missing or invalid API key",
+                    "value": { "success": false, "error": "Invalid or missing API key.", "code": "UNAUTHORIZED" }
+                  },
+                  "invalidSignature": {
+                    "summary": "Missing, expired, or invalid request signature",
+                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
+                  }
+                }
               }
             }
           },
@@ -372,9 +404,9 @@
     },
     "/api/merchant/orders/{id}/status": {
       "get": {
-        "tags": ["orders"],
+        "tags": ["Order Status"],
         "summary": "Get order status",
-        "description": "Returns the current status of an order. Poll this endpoint every 3–5 seconds after creating an order to detect when it is confirmed or rejected.\n\n**Status values**:\n- `Pending` — waiting for the customer to submit their transaction reference on the payment page\n- `Confirmed` — the assigned member verified receipt of funds and approved the order\n- `Rejected` — the assigned member did not receive the payment and rejected the order; prompt the customer to retry\n- `Expired` — the order timed out without confirmation",
+        "description": "Returns the current status of an order. Poll this endpoint every 3–5 seconds after creating an order to detect when it is confirmed or rejected.\n\n**Status values**:\n- `Pending` — waiting for the customer to submit their transaction reference on the payment page\n- `Confirmed` — the assigned member verified receipt of funds and approved the order\n- `Rejected` — the assigned member did not receive the payment and rejected the order; prompt the customer to retry\n- `Expired` — the order timed out without confirmation\n\nThis request must be signed — see [Request Signing](/signing).",
         "operationId": "getOrderStatus",
         "parameters": [
           {
@@ -387,7 +419,9 @@
             },
             "description": "The `orderId` returned when you created the order.",
             "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-          }
+          },
+          { "$ref": "#/components/parameters/SignatureTimestampHeader" },
+          { "$ref": "#/components/parameters/SignatureSignatureHeader" }
         ],
         "responses": {
           "200": {
@@ -399,10 +433,20 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key",
+            "description": "Missing/invalid API key (`UNAUTHORIZED`), or missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`) — see [Request Signing](/signing)",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "examples": {
+                  "invalidApiKey": {
+                    "summary": "Missing or invalid API key",
+                    "value": { "success": false, "error": "Invalid or missing API key.", "code": "UNAUTHORIZED" }
+                  },
+                  "invalidSignature": {
+                    "summary": "Missing, expired, or invalid request signature",
+                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
+                  }
+                }
               }
             }
           },
@@ -419,10 +463,14 @@
     },
     "/api/merchant/orders/balance": {
       "get": {
-        "tags": ["balance"],
+        "tags": ["Account Balance"],
         "summary": "Get balance",
-        "description": "Returns the current platform balance associated with your API key, including any frozen amount from pending orders.",
+        "description": "Returns the current platform balance associated with your API key, including any frozen amount from pending orders.\n\nThis request must be signed — see [Request Signing](/signing).",
         "operationId": "getBalance",
+        "parameters": [
+          { "$ref": "#/components/parameters/SignatureTimestampHeader" },
+          { "$ref": "#/components/parameters/SignatureSignatureHeader" }
+        ],
         "responses": {
           "200": {
             "description": "Balance retrieved",
@@ -433,10 +481,20 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key",
+            "description": "Missing/invalid API key (`UNAUTHORIZED`), or missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`) — see [Request Signing](/signing)",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "examples": {
+                  "invalidApiKey": {
+                    "summary": "Missing or invalid API key",
+                    "value": { "success": false, "error": "Invalid or missing API key.", "code": "UNAUTHORIZED" }
+                  },
+                  "invalidSignature": {
+                    "summary": "Missing, expired, or invalid request signature",
+                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
+                  }
+                }
               }
             }
           }

@@ -1,57 +1,74 @@
 ---
-title: "Introduction"
-description: "C2C Platform enables merchants to accept PKR payments via JazzCash and Easypaisa through a distributed member network."
+title: "C2C Merchant API"
+description: "Accept deposits and send withdrawals through Pakistani mobile wallets, without integrating with each wallet provider yourself."
 ---
 
-# C2C Merchant API
+## What C2C does
 
-The C2C Platform lets you accept mobile wallet payments in Pakistan without a direct
-JazzCash or Easypaisa gateway integration. Instead, verified members process payments
-through their personal wallet accounts and confirm receipt on your behalf.
+C2C connects your platform to a network of **verified members** who hold JazzCash, Easypaisa, Till ID and bank accounts. For every order, C2C assigns an available member with a matching account:
 
-## How it works
+- **Deposits:** your customer pays the member's account through a C2C-hosted payment page. The member confirms receipt, and your merchant wallet is credited.
+- **Withdrawals:** the member pays your customer's account. When the payout is confirmed, your merchant wallet is debited.
 
-1. **You create an order** via the API from your backend
-2. **Your customer is redirected** to a hosted payment page with clear transfer instructions
-3. **Your customer transfers money** to the assigned member's wallet
-4. **A verified member confirms** the transfer in their app
-5. **You fulfil the order** after polling for confirmation
+Your backend talks to one API, and C2C handles member assignment, payment instructions, confirmation and settlement to your merchant wallet.
 
-## What you can build
+## How an integration works
+
+```mermaid
+flowchart LR
+    A[Get API key<br/>and signing secret] --> B[Authenticate<br/>Bearer API key]
+    B --> C[Sign request<br/>HMAC-SHA256]
+    C --> D[Create deposit<br/>or withdrawal]
+    D --> E[Store orderId<br/>redirect customer for deposits]
+    E --> F[Webhook and/or<br/>status query]
+    F --> G[Fulfil on Completed]
+```
 
 <CardGroup cols={2}>
-  <Card title="Game coin purchases" icon="gamepad">
-    Let players buy in-game currency with local mobile wallets
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Your first signed deposit, end to end
   </Card>
-  <Card title="Digital product sales" icon="box">
-    Accept payments for any digital product or service
+  <Card title="API reference" icon="code" href="/api-reference/introduction">
+    Endpoints, fields, responses and errors
   </Card>
-  <Card title="Service subscriptions" icon="refresh">
-    Process recurring payments through your backend
+  <Card title="Signature Generation Guide" icon="signature" href="/api-reference/signature-guide">
+    Required for every request. Code in C#, Node.js, Python and PHP.
   </Card>
-  <Card title="Marketplace payouts" icon="money-bill">
-    Distribute payouts to sellers and creators
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Signed callbacks when orders complete or fail
   </Card>
 </CardGroup>
 
-## Base URL
+## Core business processes
 
-All API requests use the following base URL:
+<CardGroup cols={2}>
+  <Card title="Deposit flow" icon="arrow-down-to-line" href="/guides/deposit-flow">
+    Collect payments through the hosted payment page
+  </Card>
+  <Card title="Withdrawal flow" icon="arrow-up-from-line" href="/guides/withdrawal-flow">
+    Pay customers out to their own wallet
+  </Card>
+  <Card title="Hosted payment page" icon="window-maximize" href="/guides/hosted-payment-page">
+    What your customer sees during a deposit
+  </Card>
+  <Card title="Order status & tracking" icon="list-check" href="/guides/order-status">
+    Statuses, identifiers and reliable outcome tracking
+  </Card>
+</CardGroup>
 
-```
-https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io
-```
+## At a glance
 
-## Supported wallets
-
-| Wallet | Type |
-|--------|------|
-| JazzCash | Mobile wallet |
-| Easypaisa | Mobile wallet |
-| TillID | QR-based wallet |
-| BankAccount | Bank transfer |
+| | |
+|---|---|
+| **Style** | REST, JSON, HTTPS |
+| **Authentication** | `Authorization: Bearer mk_live_...` |
+| **Request signing** | HMAC-SHA256 (`X-C2C-Timestamp`, `X-C2C-Signature`). Always enforced for deposits and withdrawals. |
+| **Idempotency** | `Idempotency-Key` header required on order creation |
+| **Wallets** | JazzCash, Easypaisa, Till ID, bank account (enabled per merchant) |
+| **Currencies** | PKR (default), INR, BDT |
+| **Notifications** | Webhooks `order.completed` / `order.failed` + status polling |
+| **Rate limit** | 100 requests per minute per API key |
 
 ## Need help?
 
-- Email: support@c2cplatform.com
-- Dashboard: https://dashboard.c2cplatform.com
+Email [support@c2cplatform.com](mailto:support@c2cplatform.com) and include the `traceId` from any error response.

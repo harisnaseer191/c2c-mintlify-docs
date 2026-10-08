@@ -1,0 +1,310 @@
+---
+title: "Create Withdrawal Order"
+api: "POST /api/merchant/orders"
+description: "Create a withdrawal order that pays your customer out to their own mobile wallet or account."
+---
+
+## Overview
+
+Creates a **withdrawal**: a C2C member sends money from their own account to your customer's account. When the member confirms the payout, the amount plus fees is debited from your merchant wallet.
+
+Before creating the order, C2C checks that your merchant wallet can fund it (see [Funding check](#funding-check)). The member is assigned immediately, and the order starts in `AwaitingMemberPayout`. You don't need to redirect the customer anywhere: their account details are part of the request. See the [Withdrawal flow](/guides/withdrawal-flow) for the full lifecycle.
+
+| | |
+|---|---|
+| **API key** | Required |
+| **Signature** | **Required, always enforced.** See the [Signature Generation Guide](/api-reference/signature-guide) |
+| **Idempotency-Key** | Required |
+
+<Info>
+  Deposits and withdrawals use the same endpoint. Set `orderType` to `"Withdrawal"` and provide `customerAccountNumber`.
+</Info>
+
+## Headers
+
+<ParamField header="Authorization" type="string" required>
+  `Bearer mk_live_...`, your merchant API key.
+</ParamField>
+
+<ParamField header="X-C2C-Timestamp" type="string" required>
+  Unix time in seconds when the request was signed. Must be within 300 seconds of C2C's clock.
+</ParamField>
+
+<ParamField header="X-C2C-Signature" type="string" required>
+  `sha256=` + lowercase hex HMAC-SHA256 of `{timestamp}\n{METHOD}\n{path}\n{hex(sha256(body))}`, keyed with your signing secret.
+  The signature covers the whole body, so the payout account number and amount cannot be changed in transit.
+</ParamField>
+
+<ParamField header="Idempotency-Key" type="string" required>
+  Your unique key for this payout attempt, up to 100 characters. **Critical for payouts:** retrying with the same key never creates a second payout. See [Idempotency](/api-reference/idempotency).
+</ParamField>
+
+<ParamField header="Content-Type" type="string" required>
+  `application/json`
+</ParamField>
+
+## Request body
+
+<ParamField body="orderType" type="string" required>
+  Must be `"Withdrawal"`.
+</ParamField>
+
+<ParamField body="amount" type="number" required>
+  Amount the customer receives, in `currency`. Must be greater than `0`.
+
+  **Example:** `2000`
+</ParamField>
+
+<ParamField body="walletType" type="string" required>
+  The type of the customer's receiving account. C2C assigns a member who can pay out to it.
+
+  One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
+</ParamField>
+
+<ParamField body="customerAccountNumber" type="string" required>
+  The customer's receiving account: a mobile wallet number such as `03001234567`, a Till ID or a bank account number. Up to 50 characters. Shown to the assigned member, who sends the payout to it.
+
+  <Warning>
+    C2C doesn't verify that the account exists or belongs to your customer. Validate it on your side before you submit. A payout sent to a wrong account can't be reversed by C2C.
+  </Warning>
+</ParamField>
+
+<ParamField body="currency" type="string" default="PKR">
+  ISO currency code: `PKR`, `INR` or `BDT`. Defaults to `PKR`.
+</ParamField>
+
+<ParamField body="merchantOrderRef" type="string">
+  Your own reference for this payout. Up to 200 characters. It is echoed in [webhooks](/guides/webhooks). Uniqueness isn't enforced.
+</ParamField>
+
+<ParamField body="customerReference" type="string">
+  Your identifier for the customer being paid. Up to 200 characters.
+</ParamField>
+
+<ParamField body="callbackUrl" type="string">
+  Absolute `http(s)` URL for this order's [webhooks](/guides/webhooks), up to 500 characters. Defaults to the callback URL in **Merchant Portal → Settings**.
+</ParamField>
+
+<ParamField body="maxRetryCount" type="integer" default="3">
+  `0` to `10`. If the assigned member doesn't pay out within the payout window (60 minutes by default), C2C reassigns the withdrawal to another available member, up to this many times. After that, the order moves to `ManualReview`.
+</ParamField>
+
+<ParamField body="metadata" type="string">
+  Free-form string stored with the order, up to 1000 characters. It isn't returned in responses or webhooks.
+</ParamField>
+
+<ParamField body="successUrl" type="string">
+  Accepted and stored, but not used for withdrawals.
+</ParamField>
+
+<ParamField body="failureUrl" type="string">
+  Accepted and stored, but not used for withdrawals.
+</ParamField>
+
+<ParamField body="txnRefDigitsRequired" type="integer" default="4">
+  Accepted (`4` to `8`), but only used by the deposit payment page.
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties" defaultOpen>
+    <ResponseField name="orderId" type="uuid">
+      C2C's unique order ID. Store it for [status queries](/api-reference/endpoints/query-order-status) and webhook matching.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Initial status, always `AwaitingMemberPayout` for a new withdrawal.
+    </ResponseField>
+    <ResponseField name="orderReference" type="string">
+      C2C's human-readable reference, for example `ORD-20261008120621-a7b8`.
+    </ResponseField>
+    <ResponseField name="paymentPageUrl" type="string">
+      Returned for every order type. Withdrawals don't need it, so you can ignore it.
+    </ResponseField>
+    <ResponseField name="expiresAt" type="string">
+      Expiry of `paymentPageUrl`, 15 minutes after creation. It **isn't** the payout deadline.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+# TIMESTAMP / SIGNATURE: see the Signature Generation Guide
+BODY='{"orderType":"Withdrawal","amount":2000,"currency":"PKR","walletType":"Easypaisa","merchantOrderRef":"PAYOUT-20017","customerReference":"player_12345","customerAccountNumber":"03001234567"}'
+
+curl --request POST \
+  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
+  --header "Authorization: Bearer $C2C_API_KEY" \
+  --header "Content-Type: application/json" \
+  --header "Idempotency-Key: PAYOUT-20017" \
+  --header "X-C2C-Timestamp: $TIMESTAMP" \
+  --header "X-C2C-Signature: $SIGNATURE" \
+  --data "$BODY"
+```
+
+```javascript Node.js
+// signRequest(): see the Signature Generation Guide
+const path = '/api/merchant/orders';
+const body = JSON.stringify({
+  orderType: 'Withdrawal',
+  amount: 2000,
+  currency: 'PKR',
+  walletType: 'Easypaisa',
+  merchantOrderRef: 'PAYOUT-20017',
+  customerReference: 'player_12345',
+  customerAccountNumber: '03001234567',
+});
+
+const response = await fetch(
+  `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'PAYOUT-20017',
+      ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
+    },
+    body,
+  }
+);
+const { data } = await response.json();
+// Persist data.orderId; await the webhook or poll the status
+```
+
+```python Python
+import json, os, requests
+
+# sign_request(): see the Signature Generation Guide
+path = "/api/merchant/orders"
+body = json.dumps({
+    "orderType": "Withdrawal",
+    "amount": 2000,
+    "currency": "PKR",
+    "walletType": "Easypaisa",
+    "merchantOrderRef": "PAYOUT-20017",
+    "customerReference": "player_12345",
+    "customerAccountNumber": "03001234567",
+}, separators=(",", ":"))
+
+response = requests.post(
+    f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
+    data=body.encode("utf-8"),
+    headers={
+        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "PAYOUT-20017",
+        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
+    },
+)
+order_id = response.json()["data"]["orderId"]
+```
+</RequestExample>
+
+<ResponseExample>
+```json 200 OK
+{
+  "data": {
+    "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=d1926af5-053d-4b39-a73b-c82f0d9af656&expires=1791462081&signature=Pq7...",
+    "status": "AwaitingMemberPayout",
+    "orderReference": "ORD-20261008120621-a7b8",
+    "expiresAt": "2026-10-08T12:21:21.717975Z"
+  }
+}
+```
+
+```json 400 Missing account
+{
+  "error": "CustomerAccountNumber is required for withdrawal orders."
+}
+```
+
+```json 401 Signature
+{
+  "success": false,
+  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "code": "SIGNATURE_REQUIRED",
+  "traceId": "b7e7de9cb3606f164c88c36419ed8e7b"
+}
+```
+
+```json 422 Insufficient balance
+{
+  "error": "Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required for this withdrawal and withdrawals in progress (including fees)."
+}
+```
+
+```json 422 Channel disabled
+{
+  "error": "Easypaisa withdrawals are disabled for this merchant."
+}
+```
+
+```json 422 No member available
+{
+  "error": "No eligible member is currently available for this order."
+}
+```
+</ResponseExample>
+
+## Error responses
+
+| Status | When | Body |
+|--------|------|------|
+| `400` | Validation failed, for example `customerAccountNumber` missing or too long, amount ≤ 0, or an unknown currency | `{"error": "..."}` |
+| `400` | `Idempotency-Key` missing, malformed JSON, or an unknown enum value | `application/problem+json` |
+| `401` | API key missing, invalid or revoked | Empty body |
+| `401` | Signature missing, malformed, expired, invalid or replayed | `{"success": false, "error", "code", "traceId"}` |
+| `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
+| `413` | Body larger than 64 KB | `{"code": "PAYLOAD_TOO_LARGE", ...}` |
+| `422` | Your available balance can't cover this payout plus fee and the withdrawals already in progress | `{"error": "Insufficient merchant balance: ..."}` |
+| `422` | The wallet channel is disabled for withdrawals on your account | `{"error": "..."}` |
+| `422` | No member can currently pay out this wallet type and amount | `{"error": "No eligible member is currently available for this order."}` |
+| `429` | [Rate limit](/api-reference/rate-limits) exceeded | Empty body |
+
+## Funding check
+
+A withdrawal is accepted only if your **available balance** covers:
+
+```text
+this payout's amount + its fee
++ amount + fee of every withdrawal still in progress (AwaitingMemberPayout, ManualReview)
+```
+
+Otherwise the request fails with `422 Insufficient merchant balance: …`, and no order is created. Top up your wallet, or wait for in-progress payouts to finish, then retry. You can reuse the same `Idempotency-Key`, because rejected requests don't consume it.
+
+Fees come from the fee rules C2C configures for your account. The **amount + fee** is debited when the member confirms the payout. That confirmation always completes, because the customer has already been paid; if fee rules changed in between, the debit can take your balance slightly below zero. Check balances with [Query wallet balance](/api-reference/endpoints/query-balance).
+
+## Payout lifecycle
+
+```text
+AwaitingMemberPayout ──member confirms payout──▶ Completed      (order.completed webhook)
+        │
+        ├──member rejects────────────────────────▶ Rejected       (order.failed webhook)
+        │
+        └──payout window passes (60 min default)
+              ├── retries left → reassigned to another member (stays AwaitingMemberPayout)
+              └── no retries left → ManualReview (order.failed webhook, reason "Escalated to manual review")
+```
+
+<Warning>
+  Treat a withdrawal as paid only when its status is `Completed`. An order in `ManualReview` is being handled by C2C operations. Don't resubmit the payout with a new `Idempotency-Key` while it is unresolved, or the customer could be paid twice.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Withdrawal flow" icon="diagram-project" href="/guides/withdrawal-flow">
+    End-to-end payout process
+  </Card>
+  <Card title="Query order status" icon="magnifying-glass" href="/api-reference/endpoints/query-order-status">
+    Track the payout
+  </Card>
+  <Card title="Wallet balance" icon="wallet" href="/api-reference/endpoints/query-balance">
+    Make sure you can fund payouts
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Get notified on completion
+  </Card>
+</CardGroup>

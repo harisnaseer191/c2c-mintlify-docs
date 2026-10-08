@@ -2,341 +2,80 @@
   "openapi": "3.1.0",
   "info": {
     "title": "C2C Merchant API",
-    "description": "API for merchants to create payment orders, check order status, and query balance on the C2C Platform.",
     "version": "1.0.0",
+    "description": "Create deposit and withdrawal orders, query order status and wallet balance. Every request is authenticated with a Bearer API key and signed with HMAC-SHA256 (X-C2C-Timestamp / X-C2C-Signature); order creation always enforces the signature and accepts each signature once. See the Signature Generation Guide.",
     "contact": {
-      "name": "C2C Support",
       "email": "support@c2cplatform.com"
     }
   },
   "servers": [
     {
       "url": "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io",
-      "description": "Production"
+      "description": "Development / integration"
     }
   ],
   "security": [
-    { "bearerAuth": [] }
-  ],
-  "components": {
-    "securitySchemes": {
-      "bearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "API Key",
-        "description": "Your merchant API key in the format `mk_live_xxxx`. Pass it as a Bearer token.",
-        "x-default": "mk_live_your_api_key_here"
-      }
-    },
-    "parameters": {
-      "SignatureTimestampHeader": {
-        "name": "X-C2C-Timestamp",
-        "in": "header",
-        "required": true,
-        "schema": { "type": "integer", "example": 1750000000 },
-        "description": "Unix epoch seconds used to build the request signature. See the [Request Signing](/signing) guide. Requests more than 5 minutes out of sync with the server clock are rejected."
-      },
-      "SignatureSignatureHeader": {
-        "name": "X-C2C-Signature",
-        "in": "header",
-        "required": true,
-        "schema": { "type": "string", "example": "sha256=9439f71c99f229e9edfbfbb5464ffe1fb9b506061b6de9c55d52c88dcd4c18f6" },
-        "description": "`sha256=<hex>` — HMAC-SHA256 of the canonical request string (`timestamp\nMETHOD\npath\nhex(sha256(body))`), keyed with your signing secret. On `POST` requests each signature is accepted only once — re-sign every retry with a fresh timestamp or it is rejected as `SIGNATURE_REPLAYED`. See the [Request Signing](/signing) guide."
-      }
-    },
-    "schemas": {
-      "CreateOrderRequest": {
-        "type": "object",
-        "required": ["orderType", "amount", "walletType"],
-        "properties": {
-          "orderType": {
-            "type": "string",
-            "enum": ["Deposit", "Withdrawal"],
-            "description": "Type of order to create.",
-            "example": "Deposit"
-          },
-          "amount": {
-            "type": "number",
-            "format": "decimal",
-            "description": "Order amount in PKR. Must be a positive value within your configured pay/draw limits.",
-            "example": 1500.00
-          },
-          "currency": {
-            "type": "string",
-            "default": "PKR",
-            "description": "Currency code. Currently only PKR is supported.",
-            "example": "PKR"
-          },
-          "walletType": {
-            "type": "string",
-            "enum": ["JazzCash", "Easypaisa", "TillID", "BankAccount"],
-            "description": "The wallet type the customer will use to send or receive money. Required — the platform selects an available member who has an approved account of this wallet type.",
-            "example": "JazzCash"
-          },
-          "merchantOrderRef": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 200,
-            "description": "Your own reference number for this order (e.g. your internal order ID). Returned in status responses and webhook payloads.",
-            "example": "ORD-20260618-7890"
-          },
-          "customerAccountNumber": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 50,
-            "description": "**Required for Withdrawal orders.** The customer's wallet account number that the assigned member will send money to.",
-            "example": "03211234567"
-          },
-          "customerReference": {
-            "type": "string",
-            "nullable": true,
-            "maxLength": 200,
-            "description": "Your internal customer identifier for reference and filtering.",
-            "example": "player_12345"
-          },
-          "callbackUrl": {
-            "type": "string",
-            "format": "uri",
-            "nullable": true,
-            "maxLength": 500,
-            "description": "Absolute `http://` or `https://` URL (HTTPS recommended) that receives a webhook POST when the order completes or fails. Webhooks are signed with your API key's signing secret. Any other scheme is rejected with `400`. See the [Webhooks guide](/webhooks) for payload shapes and signature verification.",
-            "example": "https://yoursite.com/webhooks/c2c"
-          },
-          "successUrl": {
-            "type": "string",
-            "format": "uri",
-            "nullable": true,
-            "maxLength": 500,
-            "description": "Absolute `http://` or `https://` URL the payment page sends the customer to, 5 seconds after the order is `Completed`/`Confirmed`, with `c2c_order_id`, `c2c_order_reference` and `c2c_status` query parameters appended. Any other scheme is rejected with `400`. The redirect is not proof of payment — confirm via webhook or the status endpoint before fulfilling. If omitted, the payment page shows a generic success screen.",
-            "example": "https://yoursite.com/payment/success"
-          },
-          "failureUrl": {
-            "type": "string",
-            "format": "uri",
-            "nullable": true,
-            "maxLength": 500,
-            "description": "Absolute `http://` or `https://` URL the payment page sends the customer to, 5 seconds after the order is rejected, cancelled or expires, with `c2c_order_id`, `c2c_order_reference` and `c2c_status` query parameters appended. Any other scheme is rejected with `400`. If omitted, the payment page shows a generic failure screen.",
-            "example": "https://yoursite.com/payment/failed"
-          },
-          "metadata": {
-            "type": "string",
-            "nullable": true,
-            "description": "Arbitrary string (e.g. JSON) you can attach to the order for your own reference. Not displayed to customers or members.",
-            "example": "{\"userId\": 42, \"gameId\": \"galaxy-conquest\"}"
-          },
-          "txnRefDigitsRequired": {
-            "type": "integer",
-            "minimum": 4,
-            "maximum": 8,
-            "default": 4,
-            "description": "Number of trailing digits from the wallet transaction ID that the customer must enter on the payment page. Allowed range: 4–8. Defaults to 4.",
-            "example": 4
-          },
-          "maxRetryCount": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 10,
-            "default": 3,
-            "description": "Maximum number of times the customer can re-submit a transaction reference after a member rejection. When retries are exhausted the order moves to ManualReview. Allowed range: 0–10. Defaults to 3.",
-            "example": 3
-          }
-        }
-      },
-      "CreateOrderResponse": {
-        "type": "object",
-        "properties": {
-          "success": { "type": "boolean", "example": true },
-          "data": {
-            "type": "object",
-            "properties": {
-              "orderId": {
-                "type": "string",
-                "format": "uuid",
-                "description": "Unique order identifier. Use this to poll status or in webhook matching.",
-                "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-              },
-              "orderReference": {
-                "type": "string",
-                "description": "Platform-generated human-readable order reference.",
-                "example": "C2C-20260618-001234"
-              },
-              "paymentPageUrl": {
-                "type": "string",
-                "format": "uri",
-                "description": "Signed URL to redirect your customer to. The payment page displays the assigned member's account number and collects the customer's transaction reference. Expires at `expiresAt`.",
-                "example": "https://payment.c2cplatform.com/pay?order_id=a1b2c3d4&signature=abc123&expires=1750291234"
-              },
-              "status": {
-                "type": "string",
-                "enum": ["Queued", "AwaitingCustomerPayment", "AwaitingMemberConfirmation", "AwaitingMemberPayout", "Completed", "Confirmed", "Rejected", "Cancelled", "Expired", "ManualReview"],
-                "description": "Initial status. Newly created deposit orders start as `Queued`; withdrawal orders start as `AwaitingMemberPayout`.",
-                "example": "Queued"
-              },
-              "expiresAt": {
-                "type": "string",
-                "format": "date-time",
-                "description": "UTC timestamp when the payment page URL expires (15 minutes from creation). After this time the order moves to `Expired` if the customer has not submitted a transaction reference.",
-                "example": "2026-06-18T15:00:00Z"
-              }
-            }
-          }
-        }
-      },
-      "OrderStatusResponse": {
-        "type": "object",
-        "properties": {
-          "success": { "type": "boolean", "example": true },
-          "data": {
-            "type": "object",
-            "properties": {
-              "orderId": { "type": "string", "format": "uuid" },
-              "orderReference": { "type": "string", "example": "C2C-20260618-001234" },
-              "status": {
-                "type": "string",
-                "enum": ["Queued", "AwaitingCustomerPayment", "AwaitingMemberConfirmation", "AwaitingMemberPayout", "Completed", "Confirmed", "Rejected", "Cancelled", "CancelledAuto", "Expired", "ManualReview"],
-                "description": "Current status of the order. See the status lifecycle table in the server integration guide.",
-                "example": "Completed"
-              },
-              "amount": {
-                "type": "number",
-                "format": "decimal",
-                "description": "Order amount in PKR.",
-                "example": 1500.00
-              },
-              "queuedAt": {
-                "type": "string",
-                "format": "date-time",
-                "description": "When the order entered the queue (UTC).",
-                "example": "2026-06-18T14:30:00Z"
-              },
-              "confirmedAt": {
-                "type": "string",
-                "format": "date-time",
-                "nullable": true,
-                "description": "When the order was confirmed (UTC). Null if not yet confirmed.",
-                "example": "2026-06-18T14:35:22Z"
-              },
-              "cancelledAt": {
-                "type": "string",
-                "format": "date-time",
-                "nullable": true,
-                "description": "When the order was cancelled (UTC). Null for non-cancelled orders."
-              }
-            }
-          }
-        }
-      },
-      "BalanceResponse": {
-        "type": "object",
-        "properties": {
-          "success": { "type": "boolean", "example": true },
-          "data": {
-            "type": "object",
-            "properties": {
-              "balance": {
-                "type": "number",
-                "format": "decimal",
-                "description": "Current platform balance in PKR.",
-                "example": 25000.00
-              },
-              "frozenBalance": {
-                "type": "number",
-                "format": "decimal",
-                "description": "Balance temporarily frozen due to pending orders.",
-                "example": 1500.00
-              },
-              "currency": {
-                "type": "string",
-                "example": "PKR"
-              }
-            }
-          }
-        }
-      },
-      "ErrorResponse": {
-        "type": "object",
-        "properties": {
-          "success": { "type": "boolean", "example": false },
-          "error": {
-            "type": "string",
-            "description": "Human-readable error description.",
-            "example": "Idempotency-Key header is required."
-          },
-          "code": {
-            "type": "string",
-            "description": "Machine-readable error code.",
-            "example": "IDEMPOTENCY_KEY_MISSING"
-          }
-        }
-      }
+    {
+      "ApiKey": []
     }
-  },
+  ],
   "tags": [
     {
-      "name": "Orders",
-      "description": "Create payment orders"
+      "name": "Orders"
     },
     {
-      "name": "Order Status",
-      "description": "Check the status of a payment order"
-    },
-    {
-      "name": "Account Balance",
-      "description": "Query your merchant balance"
+      "name": "Account Balance"
     }
   ],
   "paths": {
     "/api/merchant/orders": {
       "post": {
-        "tags": ["Orders"],
-        "summary": "Create an order",
-        "description": "Creates a new payment order. The platform automatically selects an eligible online member whose account matches the requested `walletType`. Returns a signed payment page URL to redirect your customer to — the page displays the assigned member's account number and collects the customer's last-4-digit transaction reference.\n\n**Deposit orders**: The customer sends money to the displayed account, then submits the last 4 digits of their transaction ID (and optionally a receipt image) on the payment page. The assigned member then verifies and approves or rejects the order.\n\n**Withdrawal orders**: The assigned member sends money to `customerAccountNumber`, then confirms with the last 4 digits of their outbound transaction.\n\n**Withdrawal funding**: your available balance must cover the new withdrawal plus all withdrawals still in progress (amount + fee each), otherwise the request is rejected with `422` and no order is created.\n\n**Important**: You must include the `Idempotency-Key` header to prevent duplicate orders, and sign every request — see [Request Signing](/signing). Re-sign each retry with a fresh timestamp (keep the same `Idempotency-Key`). The `walletType` field is required.",
+        "tags": [
+          "Orders"
+        ],
         "operationId": "createOrder",
+        "summary": "Create a deposit or withdrawal order",
+        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Signature enforcement: always on. A signed POST is accepted once (replays \u2192 401 SIGNATURE_REPLAYED).",
         "parameters": [
           {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "example": "order_game_abc123xyz"
-            },
-            "description": "A unique key for this order, scoped to your API key. If you retry with the same key — including concurrent retries — the original order is returned with its current status and no duplicate is created. Keys do not expire; use a new key for every new order. See [Idempotency](/idempotency)."
+            "$ref": "#/components/parameters/Timestamp"
           },
-          { "$ref": "#/components/parameters/SignatureTimestampHeader" },
-          { "$ref": "#/components/parameters/SignatureSignatureHeader" }
+          {
+            "$ref": "#/components/parameters/Signature"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
         ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CreateOrderRequest" },
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderRequest"
+              },
               "examples": {
                 "deposit": {
-                  "summary": "Deposit order (customer sends to member account)",
+                  "summary": "Deposit",
                   "value": {
                     "orderType": "Deposit",
-                    "amount": 1500.00,
+                    "amount": 1500,
                     "currency": "PKR",
                     "walletType": "JazzCash",
-                    "merchantOrderRef": "ORD-20260618-7890",
-                    "customerReference": "player_12345",
-                    "callbackUrl": "https://yoursite.com/webhooks/c2c",
-                    "successUrl": "https://yoursite.com/payment/success",
-                    "failureUrl": "https://yoursite.com/payment/failed"
+                    "merchantOrderRef": "INV-10045",
+                    "customerReference": "player_12345"
                   }
                 },
                 "withdrawal": {
-                  "summary": "Withdrawal order (member sends to customer account)",
+                  "summary": "Withdrawal",
                   "value": {
                     "orderType": "Withdrawal",
-                    "amount": 2000.00,
+                    "amount": 2000,
                     "currency": "PKR",
                     "walletType": "Easypaisa",
-                    "merchantOrderRef": "WITHDRAW-20260618-0042",
-                    "customerAccountNumber": "03211234567",
+                    "merchantOrderRef": "PAYOUT-20017",
                     "customerReference": "player_12345",
-                    "callbackUrl": "https://yoursite.com/webhooks/c2c"
+                    "customerAccountNumber": "03001234567"
                   }
                 }
               }
@@ -345,83 +84,98 @@
         },
         "responses": {
           "200": {
-            "description": "Order created — or, for an `Idempotency-Key` already used by this API key, the original order with its current status",
+            "description": "Order created, or the existing order for a repeated Idempotency-Key.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CreateOrderResponse" }
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CreateOrderResponse"
+                    }
+                  }
+                }
               }
             }
           },
           "400": {
-            "description": "Invalid request (e.g. a `callbackUrl`/`successUrl`/`failureUrl` that is not an absolute http(s) URL) or missing Idempotency-Key",
+            "description": "Validation failed ({error}) or request could not be bound, e.g. missing Idempotency-Key / unknown enum (application/problem+json).",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "examples": {
-                  "missingIdempotencyKey": {
-                    "summary": "Missing Idempotency-Key header",
-                    "value": { "error": "Idempotency-Key header is required." }
-                  },
-                  "invalidUrl": {
-                    "summary": "Redirect or callback URL is not http(s)",
-                    "value": { "error": "SuccessUrl must be a valid absolute http(s) URL." }
-                  }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
           },
           "401": {
-            "description": "Missing/invalid API key (`UNAUTHORIZED`), missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`), or a signature that was already used (`SIGNATURE_REPLAYED`) — see [Request Signing](/signing)",
+            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "examples": {
-                  "invalidApiKey": {
-                    "summary": "Missing or invalid API key",
-                    "value": { "success": false, "error": "Invalid or missing API key.", "code": "UNAUTHORIZED" }
-                  },
-                  "invalidSignature": {
-                    "summary": "Missing, expired, or invalid request signature",
-                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
-                  },
-                  "replayedSignature": {
-                    "summary": "Same signed request sent twice — re-sign retries with a fresh timestamp",
-                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_REPLAYED" }
-                  }
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Merchant account not active, or caller IP not whitelisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "IP not in whitelist."
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body larger than 64 KB (code PAYLOAD_TOO_LARGE).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureError"
                 }
               }
             }
           },
           "422": {
-            "description": "No eligible member available for this wallet type and amount, or (withdrawals only) insufficient merchant balance to cover this withdrawal plus withdrawals in progress, including fees",
+            "description": "Withdrawal not covered by the merchant balance (amount + fee + withdrawals in progress), wallet channel disabled, or no eligible member available.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "examples": {
-                  "noEligibleMember": {
-                    "summary": "No eligible member available",
-                    "value": { "success": false, "error": "No eligible member is currently available for this order.", "code": "NO_ELIGIBLE_MEMBER" }
-                  },
-                  "insufficientBalance": {
-                    "summary": "Withdrawal: insufficient merchant balance",
-                    "value": { "error": "Insufficient merchant balance: 1200.00 PKR available, 2060.00 PKR required for this withdrawal and withdrawals in progress (including fees)." }
-                  }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "No eligible member is currently available for this order."
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limit exceeded — 100 requests/minute per API key. Empty response body; wait for the 60-second window to reset. See [Rate Limits](/rate-limits)."
+            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
           }
         }
       }
     },
     "/api/merchant/orders/{id}/status": {
       "get": {
-        "tags": ["Order Status"],
-        "summary": "Get order status",
-        "description": "Returns the current status of an order. Poll this endpoint every 3–5 seconds after creating an order to detect when it is confirmed or rejected.\n\n**Status values**:\n- `Pending` — waiting for the customer to submit their transaction reference on the payment page\n- `Confirmed` — the assigned member verified receipt of funds and approved the order\n- `Rejected` — the assigned member did not receive the payment and rejected the order; prompt the customer to retry\n- `Expired` — the order timed out without confirmation\n\nThis request must be signed — see [Request Signing](/signing).",
+        "tags": [
+          "Orders"
+        ],
         "operationId": "getOrderStatus",
+        "summary": "Query order status",
+        "description": "Returns the status of an order created with the calling API key.",
         "parameters": [
           {
             "name": "id",
@@ -431,86 +185,466 @@
               "type": "string",
               "format": "uuid"
             },
-            "description": "The `orderId` returned when you created the order.",
-            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            "description": "orderId returned at creation."
           },
-          { "$ref": "#/components/parameters/SignatureTimestampHeader" },
-          { "$ref": "#/components/parameters/SignatureSignatureHeader" }
+          {
+            "$ref": "#/components/parameters/Timestamp"
+          },
+          {
+            "$ref": "#/components/parameters/Signature"
+          }
         ],
         "responses": {
           "200": {
-            "description": "Order status retrieved",
+            "description": "Order status.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/OrderStatusResponse" }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing/invalid API key (`UNAUTHORIZED`), or missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`) — see [Request Signing](/signing)",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "examples": {
-                  "invalidApiKey": {
-                    "summary": "Missing or invalid API key",
-                    "value": { "success": false, "error": "Invalid or missing API key.", "code": "UNAUTHORIZED" }
-                  },
-                  "invalidSignature": {
-                    "summary": "Missing, expired, or invalid request signature",
-                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderStatusResponse"
+                    }
                   }
                 }
               }
             }
           },
-          "404": {
-            "description": "Order not found or does not belong to this API key",
+          "401": {
+            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureError"
+                }
               }
             }
+          },
+          "404": {
+            "description": "No order with this id for this API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Order not found."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
           }
         }
       }
     },
     "/api/merchant/orders/balance": {
       "get": {
-        "tags": ["Account Balance"],
-        "summary": "Get balance",
-        "description": "Returns the current platform balance associated with your API key, including any frozen amount from pending orders.\n\nThis request must be signed — see [Request Signing](/signing).",
+        "tags": [
+          "Account Balance"
+        ],
         "operationId": "getBalance",
+        "summary": "Query wallet balance",
         "parameters": [
-          { "$ref": "#/components/parameters/SignatureTimestampHeader" },
-          { "$ref": "#/components/parameters/SignatureSignatureHeader" }
+          {
+            "$ref": "#/components/parameters/Timestamp"
+          },
+          {
+            "$ref": "#/components/parameters/Signature"
+          }
         ],
         "responses": {
           "200": {
-            "description": "Balance retrieved",
+            "description": "Merchant wallet balance.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/BalanceResponse" }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing/invalid API key (`UNAUTHORIZED`), or missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`) — see [Request Signing](/signing)",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "examples": {
-                  "invalidApiKey": {
-                    "summary": "Missing or invalid API key",
-                    "value": { "success": false, "error": "Invalid or missing API key.", "code": "UNAUTHORIZED" }
-                  },
-                  "invalidSignature": {
-                    "summary": "Missing, expired, or invalid request signature",
-                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BalanceResponse"
+                    }
                   }
                 }
               }
             }
+          },
+          "401": {
+            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API key not found or inactive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "mk_live_<32 alphanumeric>",
+        "description": "Merchant API key sent as Authorization: Bearer mk_live_..."
+      }
+    },
+    "parameters": {
+      "Timestamp": {
+        "name": "X-C2C-Timestamp",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "example": "1760000000",
+        "description": "Unix epoch seconds at signing time; must be within 300 seconds of server time."
+      },
+      "Signature": {
+        "name": "X-C2C-Signature",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^sha256=[0-9a-f]{64}$"
+        },
+        "example": "sha256=c1c7c3f90a1b862cd8d9b8c173e59677d7acff2735a7bd9580ed69e18983558c",
+        "description": "sha256= + lowercase hex HMAC-SHA256 of \"{timestamp}\\n{METHOD}\\n{path+query}\\n{hex sha256(raw body)}\" keyed with the API key's signing secret (sksec_...)."
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "description": "Unique per order attempt and API key. A repeat returns the original order; request bodies are not compared."
+      }
+    },
+    "schemas": {
+      "OrderType": {
+        "type": "string",
+        "enum": [
+          "Deposit",
+          "Withdrawal"
+        ]
+      },
+      "WalletType": {
+        "type": "string",
+        "enum": [
+          "JazzCash",
+          "Easypaisa",
+          "TillID",
+          "BankAccount"
+        ]
+      },
+      "Currency": {
+        "type": "string",
+        "enum": [
+          "PKR",
+          "INR",
+          "BDT"
+        ],
+        "default": "PKR"
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": [
+          "Queued",
+          "AwaitingCustomerPayment",
+          "AwaitingMemberConfirmation",
+          "AwaitingMemberPayout",
+          "ManualReview",
+          "Completed",
+          "Rejected",
+          "Expired",
+          "CancelledTimeout",
+          "Cancelled",
+          "CancelledAuto",
+          "Assigned",
+          "Frozen",
+          "Confirmed"
+        ],
+        "description": "Final success: Completed (legacy Confirmed). Final failure: Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto. Others are in progress."
+      },
+      "CreateOrderRequest": {
+        "type": "object",
+        "required": [
+          "orderType",
+          "amount",
+          "walletType"
+        ],
+        "properties": {
+          "orderType": {
+            "$ref": "#/components/schemas/OrderType"
+          },
+          "amount": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "example": 1500
+          },
+          "walletType": {
+            "$ref": "#/components/schemas/WalletType"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "merchantOrderRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "customerReference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "customerAccountNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50,
+            "description": "Required when orderType is Withdrawal; ignored for deposits."
+          },
+          "callbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "maxLength": 500,
+            "description": "Absolute http(s) URL for this order's webhooks; defaults to the Merchant Portal setting."
+          },
+          "successUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "maxLength": 500,
+            "description": "Absolute http(s) URL. The hosted payment page sends the customer here when the order completes, appending c2c_order_id, c2c_order_reference and c2c_status."
+          },
+          "failureUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "maxLength": 500,
+            "description": "Absolute http(s) URL. The hosted payment page sends the customer here when the order is rejected, expires or is cancelled (same parameters appended)."
+          },
+          "metadata": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1000
+          },
+          "txnRefDigitsRequired": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 8,
+            "default": 4
+          },
+          "maxRetryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 3,
+            "description": "Withdrawals: reassignment attempts after the payout window passes."
+          }
+        }
+      },
+      "CreateOrderResponse": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "paymentPageUrl",
+          "status",
+          "orderReference",
+          "expiresAt"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "paymentPageUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Hosted payment page (deposits). Pre-signed; expires at expiresAt."
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus"
+          },
+          "orderReference": {
+            "type": "string",
+            "example": "ORD-20261008120620-3f6b"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrderStatusResponse": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "orderReference",
+          "status",
+          "amount",
+          "queuedAt"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderReference": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "queuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancelledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "BalanceResponse": {
+        "type": "object",
+        "required": [
+          "availableBalance",
+          "frozenBalance",
+          "currency"
+        ],
+        "properties": {
+          "availableBalance": {
+            "type": "number"
+          },
+          "frozenBalance": {
+            "type": "number"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "SignatureError": {
+        "type": "object",
+        "required": [
+          "success",
+          "error",
+          "code",
+          "traceId"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "SIGNATURE_REQUIRED",
+              "SIGNATURE_MALFORMED",
+              "SIGNATURE_EXPIRED",
+              "SIGNATURE_INVALID",
+              "SIGNATURE_REPLAYED",
+              "PAYLOAD_TOO_LARGE"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "traceId": {
+            "type": "string"
           }
         }
       }

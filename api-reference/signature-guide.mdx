@@ -1,0 +1,457 @@
+---
+title: 'Signature Generation Guide'
+description: 'Sign every C2C Merchant API request with HMAC-SHA256 so forged, tampered or replayed requests are rejected before any money moves.'
+---
+
+## Overview
+
+Your API key identifies you. The **request signature** proves that each request was created by you, was not modified on the way, and is recent. C2C verifies the signature **before** it validates the request or runs any business logic. A request with a missing, malformed, stale or incorrect signature is rejected with `401`, and no order is created.
+
+<Info>
+  Your **signing secret** (`sksec_...`) is issued together with your API key and is shown **only once**. Each API key has its own signing secret. Sign a request with the secret that belongs to the API key in that request's `Authorization` header.
+</Info>
+
+## Which endpoints require a signature
+
+| Endpoint | Signature |
+|----------|-----------|
+| [Create deposit order](/api-reference/endpoints/create-deposit) `POST /api/merchant/orders` | **Required, always enforced.** Unsigned or incorrectly signed requests are always rejected. |
+| [Create withdrawal order](/api-reference/endpoints/create-withdrawal) `POST /api/merchant/orders` | **Required, always enforced.** |
+| [Query order status](/api-reference/endpoints/query-order-status) `GET /api/merchant/orders/{id}/status` | **Required.** Verified on every request. Rejection of invalid signatures is enabled per environment. |
+| [Query wallet balance](/api-reference/endpoints/query-balance) `GET /api/merchant/orders/balance` | **Required.** Verified on every request. Rejection of invalid signatures is enabled per environment. |
+
+<Warning>
+  Sign **every** request, including `GET` requests. Signature failures on status and balance requests are recorded today, and enforcement can be switched on for them at any time without an API change.
+</Warning>
+
+## Quick reference
+
+| Property | Value |
+|----------|-------|
+| **Algorithm** | HMAC-SHA256 |
+| **Key** | Your full signing secret, including the `sksec_` prefix, as UTF-8 bytes |
+| **Message** | `{timestamp}\n{METHOD}\n{path}\n{bodyHash}` (UTF-8, joined with a single line feed `\n`, no trailing newline) |
+| **Body hash** | Lowercase hex SHA-256 of the exact raw request body bytes. Empty body: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| **Signature header value** | `sha256=` followed by 64 lowercase hex characters |
+| **Timestamp** | Unix time in **seconds**, must be within **±300 seconds** of C2C's clock |
+| **Maximum signed body** | 64 KB (larger bodies are rejected with `413`) |
+| **Replay protection** | A signed `POST` is accepted **once**. Re-sign every retry with a fresh timestamp. |
+
+## Request headers
+
+Send these two headers in addition to `Authorization`:
+
+| Header | Example | Description |
+|--------|---------|-------------|
+| `X-C2C-Timestamp` | `1760000000` | Unix epoch **seconds** when you signed the request. Digits only. |
+| `X-C2C-Signature` | `sha256=c1c7c3f9...3558c` | `sha256=` + lowercase hex HMAC-SHA256 of the string to sign |
+
+## Signature generation algorithm
+
+<Steps>
+  <Step title="Serialize the body once">
+    Produce the exact bytes you will send, for example `JSON.stringify(payload)`. For requests with no body (`GET`), use an empty string.
+  </Step>
+  <Step title="Hash the body">
+    `bodyHash = lowercase_hex( SHA256( bodyBytes ) )`
+  </Step>
+  <Step title="Take the current timestamp">
+    `timestamp = current Unix time in seconds`, for example `1760000000`
+  </Step>
+  <Step title="Build the string to sign">
+    Join four parts with a line feed (`\n`):
+
+    ```
+    {timestamp}
+    {METHOD}
+    {path}
+    {bodyHash}
+    ```
+  </Step>
+  <Step title="Compute the HMAC">
+    `hex = lowercase_hex( HMAC_SHA256( key = signingSecret, message = stringToSign ) )`
+  </Step>
+  <Step title="Send the headers">
+    `X-C2C-Timestamp: {timestamp}` and `X-C2C-Signature: sha256={hex}`, with the **same body bytes** you hashed.
+  </Step>
+</Steps>
+
+## Canonicalization rules
+
+| Part | Rule |
+|------|------|
+| `timestamp` | The exact value of `X-C2C-Timestamp`, as an integer number of seconds. No decimals, no sign, no milliseconds. |
+| `METHOD` | The HTTP method in uppercase: `POST`, `GET`. |
+| `path` | The request path, starting with `/`, **plus the query string if there is one** (for example `/api/merchant/orders`). No scheme, host or port. Case-sensitive. Use it exactly as sent: do not add or remove a trailing slash. The current merchant endpoints use no query parameters. |
+| `bodyHash` | SHA-256 of the **raw bytes on the wire**, encoded UTF-8, in lowercase hex. |
+
+### How the body is covered
+
+C2C signs the **entire raw body**. It does not pick, sort or reformat individual fields, which has these consequences:
+
+- **Every field is protected.** That includes `amount`, `customerAccountNumber`, `callbackUrl` and every other field. Changing any byte after signing invalidates the signature.
+- **Field order and whitespace don't matter** as long as the bytes you hash are the bytes you send.
+- **Optional and `null` fields:** include or omit them as you like. Whatever you send is what is signed. `"metadata": null` and omitting `metadata` are both valid, but they produce different signatures.
+- **No number or date reformatting** is applied. `1500`, `1500.0` and `1500.00` are all accepted by the API, but each produces a different body hash, so hash the string you actually send.
+
+<Warning>
+  The most common integration bug is serializing the body twice: once to sign and again in the HTTP client. Serialize **once**, sign that string, and send the same string as the request body. With most HTTP clients this means passing a pre-serialized string or bytes, not an object.
+</Warning>
+
+## Worked example
+
+Use these fixed inputs to check your implementation. If your code produces the same `bodyHash` and `X-C2C-Signature`, it is correct.
+
+| Input | Value |
+|-------|-------|
+| Signing secret | `sksec_Q9mTz4Lk8XwR2bN6vH1cJ7pY3sF5gD0aE8uK2iOq` *(example only)* |
+| Timestamp | `1760000000` |
+| Method | `POST` |
+| Path | `/api/merchant/orders` |
+| Body | `{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345"}` |
+
+```text
+Step 1 – body bytes (UTF-8, exactly as sent)
+  {"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345"}
+
+Step 2 – bodyHash = hex(sha256(body))
+  21780f0cd6a31c4575b54dcf0721d994f67655d5827cb65fba583beb9013ee82
+
+Step 3/4 – string to sign (shown on four lines; joined with \n, no trailing newline)
+  1760000000
+  POST
+  /api/merchant/orders
+  21780f0cd6a31c4575b54dcf0721d994f67655d5827cb65fba583beb9013ee82
+
+Step 5 – hex(hmac_sha256(signingSecret, stringToSign))
+  c1c7c3f90a1b862cd8d9b8c173e59677d7acff2735a7bd9580ed69e18983558c
+
+Step 6 – headers
+  X-C2C-Timestamp: 1760000000
+  X-C2C-Signature: sha256=c1c7c3f90a1b862cd8d9b8c173e59677d7acff2735a7bd9580ed69e18983558c
+```
+
+More test vectors (same secret and timestamp):
+
+| Request | Body | Expected `X-C2C-Signature` |
+|---------|------|-----------------------------|
+| `POST /api/merchant/orders` (withdrawal) | `{"orderType":"Withdrawal","amount":2000,"currency":"PKR","walletType":"Easypaisa","merchantOrderRef":"PAYOUT-20017","customerReference":"player_12345","customerAccountNumber":"03001234567"}` | `sha256=fa507b84ec8139a2e5bc4b4013ee2b1f049983d56f972a5f4169ff2725786bf7` |
+| `GET /api/merchant/orders/3f2c8a91-6b1e-4d7a-9c55-2e8f0b4d1a77/status` | *(empty)* | `sha256=82f3123047285cf8f94ab298a1996b17cff7eb873fb0f294c610933e9f51edbf` |
+
+<Note>
+  These worked examples are checked by C2C's automated test suite against the production verification code, so they always match what the server computes.
+</Note>
+
+## Code examples
+
+Each example exposes a `signRequest` helper that returns the two headers, and shows a signed deposit request that sends **the same string it signed**.
+
+<CodeGroup>
+
+```csharp C#
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
+
+public static class C2CSigner
+{
+    public static (string Timestamp, string Signature) SignRequest(
+        string signingSecret, string method, string pathAndQuery, string body, long? timestamp = null)
+    {
+        var ts = (timestamp ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds()).ToString();
+        var bodyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(body))).ToLowerInvariant();
+        var stringToSign = $"{ts}\n{method.ToUpperInvariant()}\n{pathAndQuery}\n{bodyHash}";
+        var hmac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingSecret), Encoding.UTF8.GetBytes(stringToSign));
+        return (ts, "sha256=" + Convert.ToHexString(hmac).ToLowerInvariant());
+    }
+}
+
+// Usage: create a deposit order
+var baseUrl = "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io";
+var path = "/api/merchant/orders";
+var body = """{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345"}""";
+var (timestamp, signature) = C2CSigner.SignRequest(
+    Environment.GetEnvironmentVariable("C2C_SIGNING_SECRET")!, "POST", path, body);
+
+using var http = new HttpClient();
+using var request = new HttpRequestMessage(HttpMethod.Post, baseUrl + path)
+{
+    Content = new StringContent(body, Encoding.UTF8, "application/json"), // the exact string that was signed
+};
+request.Headers.Add("Authorization", $"Bearer {Environment.GetEnvironmentVariable("C2C_API_KEY")}");
+request.Headers.Add("Idempotency-Key", "INV-10045-attempt-1");
+request.Headers.Add("X-C2C-Timestamp", timestamp);
+request.Headers.Add("X-C2C-Signature", signature);
+
+var response = await http.SendAsync(request);
+Console.WriteLine(await response.Content.ReadAsStringAsync());
+```
+
+```javascript Node.js
+const crypto = require('crypto');
+
+function signRequest(signingSecret, method, pathAndQuery, body = '', timestamp = Math.floor(Date.now() / 1000)) {
+  const bodyHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+  const stringToSign = `${timestamp}\n${method.toUpperCase()}\n${pathAndQuery}\n${bodyHash}`;
+  const hmac = crypto.createHmac('sha256', signingSecret).update(stringToSign, 'utf8').digest('hex');
+  return {
+    'X-C2C-Timestamp': String(timestamp),
+    'X-C2C-Signature': `sha256=${hmac}`,
+  };
+}
+
+// Usage: create a deposit order (Node 18+ global fetch)
+const baseUrl = 'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io';
+const path = '/api/merchant/orders';
+const body = JSON.stringify({
+  orderType: 'Deposit',
+  amount: 1500,
+  currency: 'PKR',
+  walletType: 'JazzCash',
+  merchantOrderRef: 'INV-10045',
+  customerReference: 'player_12345',
+});
+
+const response = await fetch(baseUrl + path, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+    'Content-Type': 'application/json',
+    'Idempotency-Key': 'INV-10045-attempt-1',
+    ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
+  },
+  body, // the exact string that was signed
+});
+console.log(await response.json());
+```
+
+```python Python
+import hashlib
+import hmac
+import json
+import os
+import time
+
+import requests
+
+
+def sign_request(signing_secret: str, method: str, path_and_query: str, body: str = "",
+                 timestamp: int | None = None) -> dict:
+    ts = str(timestamp if timestamp is not None else int(time.time()))
+    body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    string_to_sign = f"{ts}\n{method.upper()}\n{path_and_query}\n{body_hash}"
+    digest = hmac.new(signing_secret.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return {"X-C2C-Timestamp": ts, "X-C2C-Signature": f"sha256={digest}"}
+
+
+# Usage: create a deposit order
+base_url = "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io"
+path = "/api/merchant/orders"
+body = json.dumps({
+    "orderType": "Deposit",
+    "amount": 1500,
+    "currency": "PKR",
+    "walletType": "JazzCash",
+    "merchantOrderRef": "INV-10045",
+    "customerReference": "player_12345",
+}, separators=(",", ":"))
+
+response = requests.post(
+    base_url + path,
+    data=body.encode("utf-8"),  # the exact bytes that were signed; do not use json=
+    headers={
+        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "INV-10045-attempt-1",
+        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
+    },
+)
+print(response.status_code, response.json())
+```
+
+```php PHP
+<?php
+
+function signRequest(string $signingSecret, string $method, string $pathAndQuery, string $body = '', ?int $timestamp = null): array
+{
+    $ts = (string) ($timestamp ?? time());
+    $bodyHash = hash('sha256', $body);
+    $stringToSign = $ts . "\n" . strtoupper($method) . "\n" . $pathAndQuery . "\n" . $bodyHash;
+    $signature = 'sha256=' . hash_hmac('sha256', $stringToSign, $signingSecret);
+
+    return ['X-C2C-Timestamp' => $ts, 'X-C2C-Signature' => $signature];
+}
+
+// Usage: create a deposit order
+$baseUrl = 'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io';
+$path = '/api/merchant/orders';
+$body = json_encode([
+    'orderType' => 'Deposit',
+    'amount' => 1500,
+    'currency' => 'PKR',
+    'walletType' => 'JazzCash',
+    'merchantOrderRef' => 'INV-10045',
+    'customerReference' => 'player_12345',
+], JSON_UNESCAPED_SLASHES);
+
+$signed = signRequest(getenv('C2C_SIGNING_SECRET'), 'POST', $path, $body);
+
+$ch = curl_init($baseUrl . $path);
+curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => $body, // the exact string that was signed
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => [
+        'Authorization: Bearer ' . getenv('C2C_API_KEY'),
+        'Content-Type: application/json',
+        'Idempotency-Key: INV-10045-attempt-1',
+        'X-C2C-Timestamp: ' . $signed['X-C2C-Timestamp'],
+        'X-C2C-Signature: ' . $signed['X-C2C-Signature'],
+    ],
+]);
+$response = curl_exec($ch);
+curl_close($ch);
+echo $response;
+```
+
+</CodeGroup>
+
+### Signing a `GET` request
+
+`GET` requests have no body, so hash the empty string:
+
+```javascript Node.js
+const path = `/api/merchant/orders/${orderId}/status`;
+const response = await fetch(baseUrl + path, {
+  headers: {
+    'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+    ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
+  },
+});
+```
+
+## How C2C validates a request
+
+Merchant API requests pass through these checks in order. A request rejected at any step never reaches the next one.
+
+```text
+Merchant request
+  1. API key authentication         → 401 (empty body) if the key is missing, unknown or revoked
+  2. Rate limit                      → 429
+  3. Signature validation            → 401 SIGNATURE_* / 413 PAYLOAD_TOO_LARGE
+       • both headers present and well-formed
+       • timestamp within ±300 s
+       • body ≤ 64 KB
+       • HMAC recomputed with your key's signing secret, constant-time comparison
+       • POST only: this exact signature has not been used before
+  4. Request validation              → 400
+  5. Business rules & order creation → 200, 403, 404, 422
+```
+
+### Signature error responses
+
+```json 401 Unauthorized
+{
+  "success": false,
+  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "code": "SIGNATURE_INVALID",
+  "traceId": "5b269362496001a7ed102e2d8cc50329"
+}
+```
+
+| `code` | HTTP | Cause | Fix |
+|--------|------|-------|-----|
+| `SIGNATURE_REQUIRED` | 401 | `X-C2C-Timestamp` or `X-C2C-Signature` is missing or empty | Send both headers on every request |
+| `SIGNATURE_MALFORMED` | 401 | Timestamp is not whole seconds, or the signature is not `sha256=` + 64 lowercase hex characters | Use Unix **seconds** (not milliseconds or ISO dates); use lowercase hex; keep the `sha256=` prefix |
+| `SIGNATURE_EXPIRED` | 401 | Timestamp is more than 300 seconds away from C2C's clock | Sync your server clock (NTP); sign immediately before sending; re-sign on every retry |
+| `SIGNATURE_INVALID` | 401 | The signature doesn't match, or the API key has no signing secret | Check the string to sign, the body bytes, and that you use the secret belonging to this API key |
+| `SIGNATURE_REPLAYED` | 401 | This exact signed `POST` (same key, timestamp, method, path and body) was already accepted | Re-sign the retry with a fresh timestamp. See [Replay protection](#replay-protection). |
+| `PAYLOAD_TOO_LARGE` | 413 | Request body is larger than 64 KB | Reduce the body, for example a shorter `metadata` value |
+
+C2C never returns the signature it expected, or any part of your secret. Quote the `traceId` to support if you need help investigating a rejection.
+
+## Replay protection
+
+A signature on a **state-changing request** (any method other than `GET` or `HEAD`, which today means `POST /api/merchant/orders`) is accepted **only once**. Sending the exact same signed request again within the timestamp window is rejected with `401 SIGNATURE_REPLAYED`. That applies even if an attacker swaps in a different `Idempotency-Key`, so a captured order request can't be replayed to create a second deposit or payout.
+
+| Protection | Covers |
+|------------|--------|
+| **One-time signatures** | A signed `POST` can be used once |
+| **Timestamp window** | A signature is only valid for 300 seconds either side of C2C's clock |
+| **Idempotency** | [Order creation](/api-reference/idempotency) requires an `Idempotency-Key`; retrying with the same key returns the original order |
+| **TLS** | Always call the API over HTTPS |
+
+<Warning>
+  **Re-sign every retry.** When you retry a `POST`, for example after a timeout, compute a fresh `X-C2C-Timestamp` and `X-C2C-Signature` for each attempt, and keep the **same** `Idempotency-Key` and body. The timestamp has one-second resolution, so wait at least **one second** before retrying an identical request. Otherwise the new signature is identical to the old one and is rejected as a replay. HTTP clients that automatically resend the same bytes will hit this.
+</Warning>
+
+`GET` requests (order status, balance) aren't subject to the one-time rule, but signing every request freshly is still recommended.
+
+## Common mistakes and troubleshooting
+
+| Symptom | Likely cause | Solution |
+|---------|--------------|----------|
+| `SIGNATURE_INVALID` on `POST` but `GET` works | Body was re-serialized after signing (for example `json=` in Python requests, or passing an object to the HTTP client) | Sign a string and send that same string |
+| `SIGNATURE_INVALID` on every request | Wrong secret, a secret from another API key or environment, or a key issued before signing was introduced | Use the secret issued with this key. Ask C2C to regenerate the key if it has no signing secret. |
+| `SIGNATURE_MALFORMED` | Uppercase hex, missing `sha256=` prefix, or a millisecond timestamp | Use lowercase hex, prefix `sha256=`, and Unix seconds |
+| `SIGNATURE_EXPIRED` | Server clock drift, or a request signed long before it is sent (for example queued) | Sign right before sending; enable NTP |
+| Works in one language, fails in another | Different line separator (`\r\n`) or a trailing newline in the string to sign | Join with `\n` only, no trailing newline |
+| Fails only for some paths | Path includes the host or a trailing slash, or differs in case from the request URL | Sign exactly the path you request, for example `/api/merchant/orders` |
+| `SIGNATURE_REPLAYED` on a retry | The retry reused the original headers, or was re-signed within the same second | Build headers inside your retry loop and back off at least 1 second |
+
+### Debugging checklist
+
+<Steps>
+  <Step title="Reproduce the worked example">
+    Run your `signRequest` with the [worked example](#worked-example) inputs and a fixed timestamp of `1760000000`. The result must be `sha256=c1c7c3f9...3558c`.
+  </Step>
+  <Step title="Check the body bytes">
+    Log `sha256(body)` just before sending and compare it with the hash of what your HTTP client actually transmits.
+  </Step>
+  <Step title="Check the string to sign">
+    Exactly four parts, joined with `\n`, method uppercase, path starting with `/`, body hash in lowercase hex.
+  </Step>
+  <Step title="Check the key">
+    The secret starts with `sksec_` and belongs to the same API key as your `Authorization` header.
+  </Step>
+  <Step title="Check the clock">
+    `X-C2C-Timestamp` is in seconds and within 5 minutes of real UTC time.
+  </Step>
+</Steps>
+
+## Signing secret management
+
+| Property | Value |
+|----------|-------|
+| Format | `sksec_` followed by 40 alphanumeric characters (46 characters in total) |
+| Issued | Together with the API key, by a C2C administrator. Shown only once. |
+| Scope | One secret per API key |
+| Also used for | Verifying [webhooks](/guides/webhooks): C2C signs callbacks with the same secret |
+| Rotation | C2C regenerates your API key, which issues a new key and secret and **revokes all your previously active keys** |
+| Revocation delay | Revoked keys and secrets stop working within about 2 minutes |
+
+<AccordionGroup>
+  <Accordion title="Keep it server-side">
+    Never put the signing secret in browser JavaScript, mobile apps or anything a customer can download. Sign requests on your server only.
+  </Accordion>
+  <Accordion title="Store it like a password">
+    Use environment variables or a secret manager such as Azure Key Vault, AWS Secrets Manager or HashiCorp Vault. Never commit it to version control, and never log it.
+  </Accordion>
+  <Accordion title="Rotate if exposed">
+    If you suspect the secret or API key has leaked, contact C2C support immediately to revoke the key and issue a new key and secret.
+  </Accordion>
+  <Accordion title="HTTPS only">
+    Call the API over HTTPS only. Signing protects integrity, not confidentiality.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Create a deposit" icon="arrow-down-to-line" href="/api-reference/endpoints/create-deposit">
+    Send your first signed request
+  </Card>
+  <Card title="Authentication" icon="key" href="/api-reference/authentication">
+    API keys, required headers and auth errors
+  </Card>
+</CardGroup>

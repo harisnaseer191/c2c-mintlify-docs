@@ -1,0 +1,283 @@
+---
+title: "Webhooks"
+description: "Receive signed callbacks when a deposit or withdrawal completes or fails."
+---
+
+## Overview
+
+C2C sends an HTTP `POST` to your callback URL when an order reaches certain outcomes, so you don't have to poll. Webhooks are a **notification**. The [order status endpoint](/api-reference/endpoints/query-order-status) remains the source of truth.
+
+```text
+Member confirms / rejects ──▶ C2C updates order ──▶ POST {callbackUrl}  (signed)
+                                                     │
+                                         your endpoint returns 2xx
+                                                     │
+                                  non-2xx / unreachable → retried later
+```
+
+## Configuring the callback URL
+
+| Source | Priority |
+|--------|----------|
+| `callbackUrl` in the [create order](/api-reference/endpoints/create-deposit) request | Used when provided |
+| Default callback URL in **Merchant Portal → Settings** | Used when the request omits `callbackUrl` |
+
+The URL is **fixed when the order is created**. Changing your portal setting later doesn't affect orders that already exist. If neither URL is set, no webhook is sent for that order.
+
+Use a publicly reachable endpoint that accepts `POST` with a JSON body. `callbackUrl` must be an absolute `http://` or `https://` URL (any other scheme is rejected with `400`). Use **HTTPS** in production.
+
+## Events
+
+| `eventType` | Sent when | `status` in payload |
+|-------------|-----------|---------------------|
+| `order.completed` | The member confirmed the order, either receipt of a deposit or the payout of a withdrawal. **Safe to fulfil.** | `Completed` (or legacy `Confirmed`) |
+| `order.failed` | The member rejected the order | `Rejected` |
+| `order.failed` | The member didn't act in time and the order was escalated for review | `ManualReview` |
+
+<Warning>
+  **Not every outcome triggers a webhook.** Orders that end as `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto`, and `ManualReview` orders later resolved by C2C, don't send a webhook. Poll the [order status](/api-reference/endpoints/query-order-status) for any order that hasn't reached a final status within your expected time window.
+</Warning>
+
+<Note>
+  `order.failed` with status `ManualReview` doesn't mean the payment failed. The order is still open, and C2C operations will resolve it to `Completed` or `Cancelled`. Don't refund or re-pay the customer until the status is final.
+</Note>
+
+## Request format
+
+```http
+POST /webhooks/c2c HTTP/1.1
+Content-Type: application/json; charset=utf-8
+X-C2C-Event: order.completed
+X-C2C-Signature: sha256=5d1f0c2e8b7a...
+X-C2C-Key-Prefix: a1b2c3d4
+```
+
+| Header | Description |
+|--------|-------------|
+| `X-C2C-Event` | Event type, the same as `eventType` in the body |
+| `X-C2C-Signature` | `sha256=` + lowercase hex HMAC-SHA256 of the **raw request body**, keyed with your API key's **signing secret** (`sksec_...`) |
+| `X-C2C-Key-Prefix` | Which of your API keys signed it: the 8 characters after `mk_live_` in that key (also shown in the Merchant Portal) |
+
+### Payload: `order.completed`
+
+```json
+{
+  "eventType": "order.completed",
+  "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
+  "orderReference": "ORD-20261008120620-3f6b",
+  "merchantOrderRef": "INV-10045",
+  "amount": 1500.0000,
+  "currency": "PKR",
+  "status": "Completed",
+  "completedAt": "2026-10-08T12:11:42.118204Z",
+  "timestamp": "2026-10-08T12:11:42.5038227Z"
+}
+```
+
+### Payload: `order.failed`
+
+```json
+{
+  "eventType": "order.failed",
+  "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+  "orderReference": "ORD-20261008120621-a7b8",
+  "merchantOrderRef": "PAYOUT-20017",
+  "amount": 2000.0000,
+  "currency": "PKR",
+  "status": "Rejected",
+  "reason": "Payment not received",
+  "timestamp": "2026-10-08T12:40:03.1180412Z"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `eventType` | string | `order.completed` or `order.failed` |
+| `orderId` | uuid | C2C order ID. Match it against the `orderId` you stored. |
+| `orderReference` | string | C2C's human-readable reference |
+| `merchantOrderRef` | string \| null | Your `merchantOrderRef` from order creation |
+| `amount` | number | Order amount |
+| `currency` | string | Currency code, for example `"PKR"` |
+| `status` | string | Order status when the event was sent |
+| `completedAt` | string | `order.completed` only. ISO 8601 UTC completion time. |
+| `reason` | string | `order.failed` only. Free-text explanation for humans, for example the member's rejection reason or `Escalated to manual review`. Don't branch on it. |
+| `timestamp` | string | ISO 8601 UTC time the event was generated. It stays the same on every retry of the same delivery. |
+
+## Verifying the signature
+
+Webhooks are signed with your API key's **signing secret** (`sksec_...`), the same secret you use to [sign API requests](/api-reference/signature-guide). No separate webhook secret is needed.
+
+Which key's secret is used:
+
+1. The API key that **created the order**, while that key is still active.
+2. Otherwise (the key was revoked or rotated), your **newest active** API key.
+
+`X-C2C-Key-Prefix` names the key, so if you hold several keys, or are mid-rotation, you can pick the matching secret instead of trying each one.
+
+<Note>
+  Every attempt is signed with the secret that is current **at that attempt**. A retry of a webhook first sent before a key rotation arrives signed with your **new** key's secret. Deploy the new secret before the old key is revoked.
+</Note>
+
+<Note>
+  Legacy API keys issued without a signing secret get webhooks signed with a platform secret and no `X-C2C-Key-Prefix` header. Ask C2C to regenerate the key to switch to per-merchant signing.
+</Note>
+
+To verify a webhook:
+
+1. Read the **raw body bytes** before any JSON parsing.
+2. Compute `sha256=` + hex(HMAC-SHA256(signingSecret, rawBody)).
+3. Compare with `X-C2C-Signature` using a **constant-time** comparison.
+4. Reject the request with `401` if they don't match, and don't process it.
+
+<CodeGroup>
+
+```javascript Node.js (Express)
+const crypto = require('crypto');
+const express = require('express');
+const app = express();
+
+function isValidSignature(rawBody, header, secret) {
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(header || '');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+app.post('/webhooks/c2c', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!isValidSignature(req.body, req.get('X-C2C-Signature'), process.env.C2C_SIGNING_SECRET)) {
+    return res.sendStatus(401);
+  }
+  const event = JSON.parse(req.body.toString('utf8'));
+  res.sendStatus(200);                 // acknowledge fast
+  await processEventOnce(event);       // then handle idempotently (see below)
+});
+```
+
+```python Python (Flask)
+import hashlib, hmac, json, os
+from flask import Flask, request, abort
+
+app = Flask(__name__)
+
+def is_valid_signature(raw_body: bytes, header: str, secret: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header or "")
+
+@app.post("/webhooks/c2c")
+def c2c_webhook():
+    raw = request.get_data()  # raw bytes, before parsing
+    if not is_valid_signature(raw, request.headers.get("X-C2C-Signature"), os.environ["C2C_SIGNING_SECRET"]):
+        abort(401)
+    event = json.loads(raw)
+    process_event_once(event)  # idempotent handler
+    return "", 200
+```
+
+```php PHP
+<?php
+$raw = file_get_contents('php://input');
+$expected = 'sha256=' . hash_hmac('sha256', $raw, getenv('C2C_SIGNING_SECRET'));
+$provided = $_SERVER['HTTP_X_C2C_SIGNATURE'] ?? '';
+
+if (!hash_equals($expected, $provided)) {
+    http_response_code(401);
+    exit;
+}
+
+$event = json_decode($raw, true);
+processEventOnce($event); // idempotent handler
+http_response_code(200);
+```
+
+```csharp C# (ASP.NET Core)
+app.MapPost("/webhooks/c2c", async (HttpRequest request, IConfiguration config) =>
+{
+    using var ms = new MemoryStream();
+    await request.Body.CopyToAsync(ms);
+    var raw = ms.ToArray();
+
+    var secret = Encoding.UTF8.GetBytes(config["C2C:SigningSecret"]!);
+    var expected = Encoding.UTF8.GetBytes("sha256=" + Convert.ToHexString(HMACSHA256.HashData(secret, raw)).ToLowerInvariant());
+    var provided = Encoding.UTF8.GetBytes(request.Headers["X-C2C-Signature"].ToString());
+
+    if (expected.Length != provided.Length || !CryptographicOperations.FixedTimeEquals(expected, provided))
+        return Results.Unauthorized();
+
+    var evt = JsonDocument.Parse(raw).RootElement;
+    await ProcessEventOnceAsync(evt); // idempotent handler
+    return Results.Ok();
+});
+```
+
+</CodeGroup>
+
+## Responding and retries
+
+- Return any **`2xx`** status to acknowledge the event. The response body is ignored.
+- Respond within **5 seconds**. Do the heavy work asynchronously after you acknowledge.
+- A non-`2xx` response, a timeout or a connection error counts as a failed delivery.
+
+A failed delivery is retried with exponential backoff, up to **10 attempts** in total:
+
+| After failed attempt | Next attempt in about |
+|----------------------|-----------------------|
+| 1 | 1 min |
+| 2 | 2 min |
+| 3 | 4 min |
+| 4 | 8 min |
+| 5 | 16 min |
+| 6 | 32 min |
+| 7 | 64 min |
+| 8 | 2 h 8 min |
+| 9 | 4 h 16 min |
+| 10 | not retried; delivery abandoned |
+
+Each retry sends the **identical body** (same `timestamp`). Retries are processed once a minute, so an attempt can arrive up to a minute after the time shown. After the last attempt, [reconcile with the status endpoint](#reconciliation).
+
+## Handling duplicates
+
+You **will** sometimes receive the same event more than once, because of retries and network timeouts. Make your handler idempotent:
+
+```javascript
+async function processEventOnce(event) {
+  const key = `${event.orderId}:${event.eventType}`;
+  if (await alreadyProcessed(key)) return;          // e.g. unique index in your DB
+
+  // Confirm against the source of truth before moving money or goods
+  const { status } = await getOrderStatus(event.orderId);
+  if (status === 'Completed' || status === 'Confirmed') {
+    await fulfilOrder(event.orderId);
+  }
+  await markProcessed(key);
+}
+```
+
+- Deduplicate on `orderId` + `eventType`.
+- Ignore events for orders you have already finalized.
+- Before fulfilling, re-check the status with [Query order status](/api-reference/endpoints/query-order-status). This also protects you if your signing secret is ever exposed.
+
+## Reconciliation
+
+Run a periodic job, for example every 5–15 minutes, that queries the status of every order you created that:
+
+- is not yet final in your system, and
+- is older than your expected completion time.
+
+That catches events with no webhook (expired, timed out, cancelled, or resolved after review) and any delivery that never reached you.
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Verify every request">
+    Reject unsigned or incorrectly signed callbacks with `401` and don't act on them.
+  </Accordion>
+  <Accordion title="Use HTTPS">
+    Your callback URL should use HTTPS with a valid certificate.
+  </Accordion>
+  <Accordion title="Don't trust the payload alone for money movement">
+    Re-check the order status before you credit a customer or mark a payout as done.
+  </Accordion>
+  <Accordion title="Keep the secret server-side">
+    The signing secret verifies webhooks and signs your API requests. Keep it in environment variables or a secret manager, never in code or logs.
+  </Accordion>
+</AccordionGroup>

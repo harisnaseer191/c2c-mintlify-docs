@@ -1,0 +1,215 @@
+---
+title: "Query Order Status"
+api: "GET /api/merchant/orders/{id}/status"
+description: "Retrieve the current status of a deposit or withdrawal order by its C2C order ID."
+---
+
+## Overview
+
+Returns the current status and key timestamps of an order created with **the same API key**. Use it to poll for the outcome, to reconcile after a missed webhook, or to confirm a webhook before you fulfil.
+
+| | |
+|---|---|
+| **API key** | Required |
+| **Signature** | Required. Sign the request with an empty body; see the [Signature Generation Guide](/api-reference/signature-guide). |
+
+## Headers
+
+<ParamField header="Authorization" type="string" required>
+  `Bearer mk_live_...`, the **same API key** that created the order.
+</ParamField>
+
+<ParamField header="X-C2C-Timestamp" type="string" required>
+  Unix time in seconds when the request was signed.
+</ParamField>
+
+<ParamField header="X-C2C-Signature" type="string" required>
+  Signature over `{timestamp}\nGET\n/api/merchant/orders/{id}/status\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. The last part is the SHA-256 of the empty body.
+</ParamField>
+
+## Path parameters
+
+<ParamField path="id" type="uuid" required>
+  The `orderId` returned by [Create deposit](/api-reference/endpoints/create-deposit) or [Create withdrawal](/api-reference/endpoints/create-withdrawal), also present in webhooks.
+
+  <Note>
+    Orders can only be looked up by `orderId`. Your `merchantOrderRef` and C2C's `orderReference` can't be used here, so always store the `orderId`.
+  </Note>
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties" defaultOpen>
+    <ResponseField name="orderId" type="uuid">
+      The order ID.
+    </ResponseField>
+    <ResponseField name="orderReference" type="string">
+      C2C's human-readable reference.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Current status. See [Status values](#status-values) below.
+    </ResponseField>
+    <ResponseField name="amount" type="number">
+      Order amount in the order currency.
+    </ResponseField>
+    <ResponseField name="queuedAt" type="string">
+      ISO 8601 UTC time the order entered the queue (creation time for withdrawals).
+    </ResponseField>
+    <ResponseField name="confirmedAt" type="string | null">
+      When the order completed successfully, otherwise `null`.
+    </ResponseField>
+    <ResponseField name="cancelledAt" type="string | null">
+      When the order was explicitly cancelled, otherwise `null`. It stays `null` for `Rejected`, `Expired` and `CancelledTimeout`; check `status` instead.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+# SIGNATURE: see the Signature Generation Guide (GET → empty body)
+curl --request GET \
+  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/788fcae0-5214-403c-baa2-f318c0eb1b5b/status \
+  --header "Authorization: Bearer $C2C_API_KEY" \
+  --header "X-C2C-Timestamp: $TIMESTAMP" \
+  --header "X-C2C-Signature: $SIGNATURE"
+```
+
+```javascript Node.js
+// signRequest(): see the Signature Generation Guide
+async function getOrderStatus(orderId) {
+  const path = `/api/merchant/orders/${orderId}/status`;
+  const response = await fetch(
+    `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+        ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
+      },
+    }
+  );
+  if (!response.ok) throw new Error(`Status query failed: HTTP ${response.status}`);
+  return (await response.json()).data;
+}
+```
+
+```python Python
+import os, requests
+
+# sign_request(): see the Signature Generation Guide
+def get_order_status(order_id: str) -> dict:
+    path = f"/api/merchant/orders/{order_id}/status"
+    response = requests.get(
+        f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
+        headers={
+            "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
+            **sign_request(os.environ["C2C_SIGNING_SECRET"], "GET", path, ""),
+        },
+    )
+    response.raise_for_status()
+    return response.json()["data"]
+```
+</RequestExample>
+
+<ResponseExample>
+```json 200 In progress
+{
+  "data": {
+    "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
+    "orderReference": "ORD-20261008120620-3f6b",
+    "status": "AwaitingMemberConfirmation",
+    "amount": 1500.0000,
+    "queuedAt": "2026-10-08T12:06:20.605646Z",
+    "confirmedAt": null,
+    "cancelledAt": null
+  }
+}
+```
+
+```json 200 Completed
+{
+  "data": {
+    "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
+    "orderReference": "ORD-20261008120620-3f6b",
+    "status": "Completed",
+    "amount": 1500.0000,
+    "queuedAt": "2026-10-08T12:06:20.605646Z",
+    "confirmedAt": "2026-10-08T12:11:42.118204Z",
+    "cancelledAt": null
+  }
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Order not found."
+}
+```
+</ResponseExample>
+
+## Status values
+
+| Status | Applies to | Meaning | Final? |
+|--------|-----------|---------|--------|
+| `Queued` | Deposit | Created. The customer hasn't chosen a wallet on the payment page yet. | No |
+| `AwaitingCustomerPayment` | Deposit | Wallet chosen and account shown. Waiting for the customer to pay and submit the transaction digits. | No |
+| `AwaitingMemberConfirmation` | Deposit | Customer submitted payment. Waiting for the member to verify receipt. | No |
+| `AwaitingMemberPayout` | Withdrawal | Waiting for the member to send the payout. | No |
+| `ManualReview` | Both | Escalated to C2C operations, for example a member confirmation or payout window passed. Resolved by C2C to `Completed` or `Cancelled`. | No |
+| `Completed` | Both | **Success.** Funds received (deposit) or paid out (withdrawal). | **Yes, success** |
+| `Rejected` | Both | The member rejected the order, for example because no matching payment was received. | **Yes, failed** |
+| `Expired` | Deposit | The customer didn't pay before the payment page expired. | **Yes, failed** |
+| `CancelledTimeout` | Deposit | No checkout activity before the queue timeout. | **Yes, failed** |
+| `Cancelled` | Both | Cancelled by C2C or the member. | **Yes, failed** |
+| `CancelledAuto` | Both | Cancelled automatically by the system. | **Yes, failed** |
+
+<Accordion title="Legacy statuses (older orders only)">
+  Orders created by earlier versions of the platform can also report `Assigned` (in progress), `Frozen` (in progress, past the member's freeze window) and `Confirmed` (**success**, equivalent to `Completed`). Treat `Confirmed` as success if you see it.
+</Accordion>
+
+<Warning>
+  Fulfil a deposit or record a payout **only** on `Completed` (or legacy `Confirmed`). `ManualReview` isn't a failure: don't refund or re-pay the customer until C2C resolves the order.
+</Warning>
+
+## Polling guidelines
+
+- Prefer [webhooks](/guides/webhooks) and poll as a fallback or to reconcile.
+- Poll every **5–10 seconds** while the customer is on the payment page, then back off (for example every minute) for orders waiting on a member.
+- Stop polling once the status is final.
+- Each API key has a [rate limit](/api-reference/rate-limits) of 100 requests per minute across all merchant endpoints. Don't poll many orders in tight loops.
+- After C2C resolves a `ManualReview` order, no webhook is sent, so keep polling those orders at a low frequency until they are final.
+
+```javascript Node.js
+const FINAL = new Set(['Completed', 'Confirmed', 'Rejected', 'Expired', 'CancelledTimeout', 'Cancelled', 'CancelledAuto']);
+const SUCCESS = new Set(['Completed', 'Confirmed']);
+
+async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 * 1000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { status } = await getOrderStatus(orderId);
+    if (FINAL.has(status)) return { status, success: SUCCESS.has(status) };
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return { status: 'Pending', success: false }; // keep reconciling later
+}
+```
+
+## Error responses
+
+| Status | When | Body |
+|--------|------|------|
+| `401` | API key missing, invalid or revoked | Empty body |
+| `401` | Signature rejected (when enforced for this endpoint) | `{"success": false, "error", "code", "traceId"}` |
+| `404` | No order with this ID **for this API key**, including orders created with a different key | `{"error": "Order not found."}` |
+| `429` | Rate limit exceeded | Empty body |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Order status guide" icon="list-check" href="/guides/order-status">
+    Lifecycle diagrams for deposits and withdrawals
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Get pushed updates instead of polling
+  </Card>
+</CardGroup>

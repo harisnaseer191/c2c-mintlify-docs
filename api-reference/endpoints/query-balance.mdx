@@ -1,0 +1,140 @@
+---
+title: "Query Wallet Balance"
+api: "GET /api/merchant/orders/balance"
+description: "Retrieve the available and frozen balance of your C2C merchant wallet."
+---
+
+## Overview
+
+Returns the current balance of your merchant wallet. The merchant is identified by the API key. Your wallet changes when orders complete:
+
+| Event | Effect on available balance |
+|-------|-----------------------------|
+| Deposit order `Completed` | **+ amount − fee** |
+| Withdrawal order `Completed` | **− (amount + fee)** |
+| Balance adjustment by C2C, for example a top-up or correction | As recorded by C2C |
+
+Orders still in progress don't affect the balance until they complete.
+
+| | |
+|---|---|
+| **API key** | Required |
+| **Signature** | Required. Sign the request with an empty body; see the [Signature Generation Guide](/api-reference/signature-guide). |
+
+<Tip>
+  This endpoint has no side effects, so it is ideal for testing your API key and signing code.
+</Tip>
+
+## Headers
+
+<ParamField header="Authorization" type="string" required>
+  `Bearer mk_live_...`, your merchant API key.
+</ParamField>
+
+<ParamField header="X-C2C-Timestamp" type="string" required>
+  Unix time in seconds when the request was signed.
+</ParamField>
+
+<ParamField header="X-C2C-Signature" type="string" required>
+  Signature over `{timestamp}\nGET\n/api/merchant/orders/balance\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties" defaultOpen>
+    <ResponseField name="availableBalance" type="number">
+      Funds available to cover withdrawals and fees.
+    </ResponseField>
+    <ResponseField name="frozenBalance" type="number">
+      Funds held by C2C that you can't currently use.
+    </ResponseField>
+    <ResponseField name="currency" type="string">
+      Wallet currency. Merchant wallets are held in `PKR`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+# SIGNATURE: see the Signature Generation Guide (GET → empty body)
+curl --request GET \
+  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance \
+  --header "Authorization: Bearer $C2C_API_KEY" \
+  --header "X-C2C-Timestamp: $TIMESTAMP" \
+  --header "X-C2C-Signature: $SIGNATURE"
+```
+
+```javascript Node.js
+// signRequest(): see the Signature Generation Guide
+const path = '/api/merchant/orders/balance';
+const response = await fetch(
+  `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
+  {
+    headers: {
+      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
+    },
+  }
+);
+const { data } = await response.json();
+console.log(`Available: ${data.availableBalance} ${data.currency}`);
+```
+
+```python Python
+import os, requests
+
+# sign_request(): see the Signature Generation Guide
+path = "/api/merchant/orders/balance"
+response = requests.get(
+    f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
+    headers={
+        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
+        **sign_request(os.environ["C2C_SIGNING_SECRET"], "GET", path, ""),
+    },
+)
+data = response.json()["data"]
+print(f"Available: {data['availableBalance']} {data['currency']}")
+```
+</RequestExample>
+
+<ResponseExample>
+```json 200 OK
+{
+  "data": {
+    "availableBalance": 48530.0000,
+    "frozenBalance": 0.0,
+    "currency": "PKR"
+  }
+}
+```
+
+```text 401 Invalid API key
+HTTP/1.1 401 Unauthorized
+Content-Length: 0
+```
+
+```json 401 Signature
+{
+  "success": false,
+  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "code": "SIGNATURE_EXPIRED",
+  "traceId": "b46d6b4e36bdcf0b90f5527593af8b46"
+}
+```
+</ResponseExample>
+
+## Error responses
+
+| Status | When | Body |
+|--------|------|------|
+| `401` | API key missing, invalid or revoked | Empty body |
+| `401` | Signature rejected (when enforced for this endpoint) | `{"success": false, "error", "code", "traceId"}` |
+| `404` | The API key was revoked while the request was in flight | `{"error": "API key not found or inactive."}` |
+| `429` | Rate limit exceeded | Empty body |
+
+## Usage tips
+
+- Check `availableBalance` before submitting [withdrawals](/api-reference/endpoints/create-withdrawal). A new withdrawal is accepted only if `availableBalance` covers its **amount + fee** plus the withdrawals still in progress; otherwise it's rejected with `422 Insufficient merchant balance`.
+- Fees come from fee rules C2C configures for your account, per order type and wallet. The fee for an order is applied when it completes.
+- For a per-transaction history, use the **Merchant Portal** (Transactions). The API exposes only the current balance.

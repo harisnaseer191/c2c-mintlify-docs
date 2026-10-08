@@ -1,0 +1,123 @@
+---
+title: "Idempotency"
+description: "Retry order creation safely. The same Idempotency-Key never creates a second deposit or withdrawal."
+---
+
+## Overview
+
+Network failures happen: a request can time out after C2C has already created the order. The `Idempotency-Key` header makes retries safe. If C2C has already created an order for a key, it returns that order instead of creating a new one.
+
+`POST /api/merchant/orders` (deposits and withdrawals) **requires** an `Idempotency-Key`. Requests without one are rejected with `400`.
+
+```http
+POST /api/merchant/orders HTTP/1.1
+Authorization: Bearer mk_live_...
+Idempotency-Key: INV-10045-attempt-1
+X-C2C-Timestamp: 1760000000
+X-C2C-Signature: sha256=...
+Content-Type: application/json
+```
+
+## How it works
+
+| Situation | Result |
+|-----------|--------|
+| New key, order created | `200` with the new order. The key is now bound to that order. |
+| Same key again (same API key) | `200` with the **original** order: same `orderId` and `orderReference`, and the order's **current** `status`. No new order is created. |
+| Same key, but the first request was **rejected** (`400`, `401`, `403`, `413`, `422`, `429`) | Treated as a new key. Rejected requests don't consume the key. |
+| Same key used with a **different** API key | Treated as a new key. Keys are scoped per API key. |
+
+<Warning>
+  **C2C doesn't compare request bodies.** If you reuse a key with a *different* amount or customer, you get the *original* order back. No new order is created and no error is returned. Never reuse a key for a different order.
+</Warning>
+
+## Key rules
+
+- **Format:** any string up to **100 characters**. Use a value you can regenerate deterministically, for example `"{yourOrderId}-attempt-{n}"`, or a UUID that you store with your order.
+- **Lifetime:** keys don't expire. A key stays bound to its order permanently.
+- **Signature:** a retry is a new request. Sign it again with a **fresh timestamp** and wait at least one second, or it's rejected as `SIGNATURE_REPLAYED` (see [Replay protection](/api-reference/signature-guide#replay-protection)). The `Idempotency-Key` stays the same.
+- **Concurrent duplicates:** if several requests with the same key arrive at the same time, only one order is created and every request gets that order back.
+
+## Safe retry pattern
+
+<CodeGroup>
+```javascript Node.js
+// signRequest(): see the Signature Generation Guide
+async function createOrderWithRetry(order, idempotencyKey, maxAttempts = 4) {
+  const path = '/api/merchant/orders';
+  const body = JSON.stringify(order);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let response;
+    try {
+      response = await fetch(BASE_URL + path, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,                                   // same key on every attempt
+          ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),  // fresh signature per attempt
+        },
+        body,
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      response = null; // network error or timeout → the order may or may not exist; retrying is safe
+    }
+
+    if (response?.ok) return (await response.json()).data;
+    if (response && response.status < 500 && response.status !== 429) {
+      throw new Error(`Not retryable: HTTP ${response.status} ${await response.text()}`);
+    }
+    await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+  }
+  throw new Error('Order creation still failing after retries. Retry later with the same Idempotency-Key.');
+}
+```
+
+```python Python
+import json, os, time, requests
+
+# sign_request(): see the Signature Generation Guide
+def create_order_with_retry(order: dict, idempotency_key: str, max_attempts: int = 4) -> dict:
+    path = "/api/merchant/orders"
+    body = json.dumps(order, separators=(",", ":"))
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.post(
+                BASE_URL + path,
+                data=body.encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": idempotency_key,                                  # same key
+                    **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),  # fresh signature
+                },
+                timeout=15,
+            )
+        except requests.RequestException:
+            response = None
+
+        if response is not None and response.ok:
+            return response.json()["data"]
+        if response is not None and response.status_code < 500 and response.status_code != 429:
+            raise RuntimeError(f"Not retryable: HTTP {response.status_code} {response.text}")
+        time.sleep(2 ** attempt)
+    raise RuntimeError("Still failing; retry later with the same Idempotency-Key.")
+```
+</CodeGroup>
+
+<Tip>
+  Persist the `Idempotency-Key` with your own order record **before** the first attempt. If your process crashes mid-request, you can resume with the same key and never create a duplicate deposit or payout.
+</Tip>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Errors" icon="triangle-exclamation" href="/api-reference/errors">
+    Which errors are retryable
+  </Card>
+  <Card title="Rate limits" icon="gauge" href="/api-reference/rate-limits">
+    Back off on 429
+  </Card>
+</CardGroup>

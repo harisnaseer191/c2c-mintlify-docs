@@ -1,82 +1,109 @@
 {
-  "$schema": "https://mintlify.com/schema.json",
-  "name": "C2C Platform",
   "theme": "mint",
-  "logo": {
-    "dark": "/logo/logo-dark.svg",
-    "light": "/logo/logo-light.svg"
-  },
-  "favicon": "/favicon.svg",
+  "name": "C2C Merchant API",
   "colors": {
     "primary": "#16A34A",
     "light": "#07C983",
     "dark": "#15803D"
   },
-  "topbarLinks": [
-    {
-      "name": "Support",
-      "url": "mailto:support@c2cplatform.com"
-    }
-  ],
-  "topbarCtaButton": {
-    "name": "Dashboard",
-    "url": "https://dashboard.c2cplatform.com"
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/logo-light.svg",
+    "dark": "/logo/logo-dark.svg"
   },
   "api": {
     "baseUrl": "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io",
-    "auth": {
-      "method": "bearer",
-      "name": "Authorization"
-    },
     "playground": {
-      "display": "interactive"
+      "display": "simple"
     },
     "examples": {
-      "languages": ["curl", "javascript", "python"],
-      "defaults": "required",
-      "prefill": true
+      "languages": ["curl", "javascript", "python"]
     }
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
+        "tab": "Guides",
         "groups": [
           {
-            "group": "Get Started",
-            "pages": ["index", "quickstart", "authentication"]
+            "group": "Getting started",
+            "pages": ["index", "quickstart"]
           },
           {
-            "group": "Integration Guides",
-            "pages": ["guides/server-integration"]
-          },
-          {
-            "group": "Reference",
-            "pages": ["errors", "rate-limits", "idempotency", "webhooks", "signing"]
+            "group": "Core business processes",
+            "pages": [
+              "guides/deposit-flow",
+              "guides/withdrawal-flow",
+              "guides/hosted-payment-page",
+              "guides/order-status",
+              "guides/webhooks"
+            ]
           }
         ]
       },
       {
-        "tab": "API Reference",
-        "openapi": "openapi.json",
+        "tab": "API reference",
         "groups": [
           {
-            "group": "Account Balance",
-            "pages": ["GET /api/merchant/orders/balance"]
+            "group": "API documentation",
+            "pages": ["api-reference/introduction", "api-reference/signature-guide"]
           },
           {
-            "group": "Orders",
-            "pages": ["POST /api/merchant/orders"]
+            "group": "Authentication",
+            "pages": ["api-reference/authentication"]
+          },
+          {
+            "group": "Account Balance",
+            "pages": ["api-reference/endpoints/query-balance"]
+          },
+          {
+            "group": "Deposit",
+            "pages": ["api-reference/endpoints/create-deposit"]
+          },
+          {
+            "group": "Withdrawal",
+            "pages": ["api-reference/endpoints/create-withdrawal"]
           },
           {
             "group": "Order Status",
-            "pages": ["GET /api/merchant/orders/{id}/status"]
+            "pages": ["api-reference/endpoints/query-order-status"]
+          },
+          {
+            "group": "Reference",
+            "pages": ["api-reference/idempotency", "api-reference/rate-limits", "api-reference/errors"]
           }
         ]
       }
     ]
   },
-  "footerSocials": {
-    "github": "https://github.com/c2cplatform"
+  "navbar": {
+    "links": [
+      {
+        "label": "Support",
+        "href": "mailto:support@c2cplatform.com"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Merchant Portal",
+      "href": "https://dashboard.c2cplatform.com"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "view", "chatgpt", "claude", "perplexity", "cursor", "vscode"]
+  },
+  "redirects": [
+    { "source": "/authentication", "destination": "/api-reference/authentication" },
+    { "source": "/signing", "destination": "/api-reference/signature-guide" },
+    { "source": "/webhooks", "destination": "/guides/webhooks" },
+    { "source": "/idempotency", "destination": "/api-reference/idempotency" },
+    { "source": "/rate-limits", "destination": "/api-reference/rate-limits" },
+    { "source": "/errors", "destination": "/api-reference/errors" },
+    { "source": "/guides/server-integration", "destination": "/quickstart" }
+  ],
+  "footer": {
+    "socials": {
+      "github": "https://github.com/c2cplatform"
+    }
   }
 }

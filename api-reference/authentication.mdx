@@ -25,6 +25,10 @@ A C2C administrator issues API keys for your merchant account, and each key come
 - **Regenerating** your API key issues a new key and secret and **revokes every previously active key** on your account.
 - A revoked key stops working within about **2 minutes**.
 
+<Note>
+  What you can do in the Merchant Portal depends on your portal role. The account owner has full access. Team members only see the pages their role allows: **API Keys** to view or revoke keys, **Settings** to change the default callback URL, and **Transactions** for order history. The account owner manages roles in the portal.
+</Note>
+
 ## Authentication method
 
 Send your API key in the `Authorization` header using the Bearer scheme:

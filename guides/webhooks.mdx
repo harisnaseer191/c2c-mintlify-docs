@@ -20,7 +20,7 @@ Member confirms / rejects ──▶ C2C updates order ──▶ POST {callbackUr
 | Source | Priority |
 |--------|----------|
 | `callbackUrl` in the [create order](/api-reference/endpoints/create-deposit) request | Used when provided |
-| Default callback URL in **Merchant Portal → Settings** | Used when the request omits `callbackUrl` |
+| Default callback URL in **Merchant Portal → Settings** (needs the Settings permission) | Used when the request omits `callbackUrl` |
 
 The URL is **fixed when the order is created**. Changing your portal setting later doesn't affect orders that already exist. If neither URL is set, no webhook is sent for that order.
 

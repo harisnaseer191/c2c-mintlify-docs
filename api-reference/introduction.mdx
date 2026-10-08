@@ -63,6 +63,7 @@ All paths in this reference are relative to the base URL, for example `POST /api
 | [Create deposit order](/api-reference/endpoints/create-deposit) | `POST /api/merchant/orders` with `"orderType": "Deposit"` | **Always enforced** |
 | [Create withdrawal order](/api-reference/endpoints/create-withdrawal) | `POST /api/merchant/orders` with `"orderType": "Withdrawal"` | **Always enforced** |
 | [Query order status](/api-reference/endpoints/query-order-status) | `GET /api/merchant/orders/{id}/status` | Sign every request |
+| [Query order status by reference](/api-reference/endpoints/query-order-status#query-by-merchantorderref) | `GET /api/merchant/orders/status?merchantOrderRef={ref}` | Sign every request |
 
 Deposits and withdrawals share a single endpoint. The `orderType` field decides which flow the order follows.
 

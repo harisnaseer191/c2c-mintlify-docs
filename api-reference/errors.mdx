@@ -9,11 +9,11 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 
 <Tabs>
   <Tab title="Business & validation errors">
-    Most errors (`400`, `403`, `404`, `422`) return a single message:
+    Most errors (`400`, `403`, `404`, `409`, `422`) return a single message:
 
     ```json
     {
-      "error": "No eligible member is currently available for this order."
+      "error": "This Idempotency-Key was already used for a different order request."
     }
     ```
 
@@ -59,13 +59,14 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 
 | Status | Meaning | Retry? |
 |--------|---------|--------|
-| `200` | Success. For order creation, also returned when an `Idempotency-Key` replay finds the existing order. | – |
-| `400` | Invalid request: validation failed, malformed JSON, unknown enum value or missing `Idempotency-Key` | No. Fix the request first. |
+| `200` | Success. For order creation, also returned when an `Idempotency-Key` replay finds the existing order, and when no member is available yet (the order is accepted as `Awaiting`). | – |
+| `400` | Invalid request: validation failed (including amount precision), malformed JSON, unknown enum value, missing `Idempotency-Key`, or a status query without an order ID or `merchantOrderRef` | No. Fix the request first. |
 | `401` | API key missing or invalid (empty body), **or** request signature rejected (`code` in body) | No. Fix the credentials or signature. Re-sign and retry for `SIGNATURE_EXPIRED` / `SIGNATURE_REPLAYED`. |
 | `403` | Merchant account not active, or caller IP not in your whitelist | No. Contact C2C. |
-| `404` | Order not found for this API key | No |
+| `404` | Order not found for your merchant account | No |
+| `409` | `merchantOrderRef` already used by an order that is in progress or completed | No. Retry with the same `Idempotency-Key`, or use a new reference for a new payment. |
 | `413` | Request body over 64 KB (`PAYLOAD_TOO_LARGE`) | No. Shrink the body. |
-| `422` | Business rule declined the order: wallet channel disabled, insufficient merchant balance (withdrawals), or no member available | Channel disabled: no. Insufficient balance: after a top-up. No member available: **yes, later**. |
+| `422` | Business rule declined the order: wallet channel disabled, insufficient merchant balance (withdrawals), or `Idempotency-Key` reused with different terms | Channel disabled: no. Insufficient balance: after a top-up. Key reused: no. Use a new key for a new order. |
 | `429` | Rate limit exceeded (empty body) | **Yes**, with backoff |
 | `500` | Unexpected server error (problem details with `traceId`) | **Yes**, with backoff. For order creation, reuse the same `Idempotency-Key`. |
 
@@ -90,6 +91,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | Status | Message (examples) | Cause |
 |--------|--------------------|-------|
 | `400` | `'Amount' must be greater than '0'.` | Invalid amount |
+| `400` | `Amount must have at most 4 decimal places and be less than 100,000,000,000,000.` | Amount too precise or too large |
 | `400` | `Currency must be one of: PKR, INR, BDT.` | Unsupported currency |
 | `400` | `CustomerAccountNumber is required for withdrawal orders.` | Withdrawal without a payout account |
 | `400` | `CallbackUrl must be a valid absolute http(s) URL.` | Not an absolute `http://` / `https://` URL. Same for `SuccessUrl` / `FailureUrl`. |
@@ -99,14 +101,20 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `403` | `Merchant account is suspended; new orders are not accepted.` | Account not active |
 | `403` | `IP not in whitelist.` | Your IP whitelist doesn't allow the caller's IP for this order type |
 | `422` | `Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required …` | Withdrawal not covered by your balance, counting fees and withdrawals in progress |
+| `409` | `merchantOrderRef 'INV-10045' is already used by order ORD-…. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment.` | Another order that is in progress or completed already uses this reference. References of failed orders can be reused. |
 | `422` | `JazzCash deposits are disabled for this merchant.` | Channel disabled for your account |
-| `422` | `No eligible member is currently available for this order.` | No online member can take this wallet, currency and amount right now |
+| `422` | `This Idempotency-Key was already used for a different order request.` | Same key, different `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` or `customerAccountNumber`. See [Idempotency](/api-reference/idempotency). |
+
+<Note>
+  There's no "no member available" error. When no eligible member is online, the order is accepted with status `Awaiting` and assigned later. See [Order status](/guides/order-status).
+</Note>
 
 ### Order status and balance
 
 | Status | Message | Cause |
 |--------|---------|-------|
-| `404` | `Order not found.` | Unknown `orderId`, or the order was created with a different API key |
+| `400` | `Provide an order id or a merchantOrderRef.` | Status query by reference without a `merchantOrderRef` value |
+| `404` | `Order not found.` | No order with this `orderId` or `merchantOrderRef` for your merchant account |
 | `404` | `API key not found or inactive.` | Key revoked while the request was being processed |
 
 ## Recommended handling
@@ -122,8 +130,11 @@ async function handle(response) {
     case 401:
       // body === null → API key problem; body.code → signature problem
       throw new Error(body?.code ? `Signature rejected: ${body.code} (trace ${body.traceId})` : 'Invalid API key');
+    case 409:
+      // merchantOrderRef already in use: look the existing order up instead of creating another
+      throw new Error(`Duplicate reference: ${body.error}`);
     case 422:
-      // Temporary when no member is available; permanent when a channel is disabled
+      // Channel disabled, insufficient balance, or Idempotency-Key reused with different terms
       throw new Error(`Declined: ${body.error}`);
     case 429:
     case 500:

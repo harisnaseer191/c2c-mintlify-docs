@@ -35,7 +35,7 @@
         ],
         "operationId": "createOrder",
         "summary": "Create a deposit or withdrawal order",
-        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Signature enforcement: always on. A signed POST is accepted once (replays \u2192 401 SIGNATURE_REPLAYED).",
+        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. Signature enforcement: always on. A signed POST is accepted once (replays \u2192 401 SIGNATURE_REPLAYED).",
         "parameters": [
           {
             "$ref": "#/components/parameters/Timestamp"
@@ -84,7 +84,7 @@
         },
         "responses": {
           "200": {
-            "description": "Order created, or the existing order for a repeated Idempotency-Key.",
+            "description": "Order created (status Queued/AwaitingMemberPayout, or Awaiting when no eligible member is available yet), or the existing order for a repeated Idempotency-Key with the same terms.",
             "content": {
               "application/json": {
                 "schema": {
@@ -102,7 +102,7 @@
             }
           },
           "400": {
-            "description": "Validation failed ({error}) or request could not be bound, e.g. missing Idempotency-Key / unknown enum (application/problem+json).",
+            "description": "Validation failed ({error}), e.g. amount with more than 4 decimal places or not less than 100,000,000,000,000; or request could not be bound, e.g. missing Idempotency-Key / unknown enum (application/problem+json).",
             "content": {
               "application/json": {
                 "schema": {
@@ -139,6 +139,19 @@
               }
             }
           },
+          "409": {
+            "description": "merchantOrderRef is already used by an order of this merchant that is in progress or completed. References of failed orders (Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto) can be reused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "merchantOrderRef 'INV-10045' is already used by order ORD-20261008120620-3f6b. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment."
+                }
+              }
+            }
+          },
           "413": {
             "description": "Request body larger than 64 KB (code PAYLOAD_TOO_LARGE).",
             "content": {
@@ -150,14 +163,14 @@
             }
           },
           "422": {
-            "description": "Withdrawal not covered by the merchant balance (amount + fee + withdrawals in progress), wallet channel disabled, or no eligible member available.",
+            "description": "Withdrawal not covered by the merchant balance (amount + fee + withdrawals in progress, including Awaiting), wallet channel disabled, or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 },
                 "example": {
-                  "error": "No eligible member is currently available for this order."
+                  "error": "This Idempotency-Key was already used for a different order request."
                 }
               }
             }
@@ -175,7 +188,7 @@
         ],
         "operationId": "getOrderStatus",
         "summary": "Query order status",
-        "description": "Returns the status of an order created with the calling API key.",
+        "description": "Returns the status, lifecycle stage and milestone timestamps of one of the merchant's orders. Scoped to the merchant: works with any of the merchant's API keys, including after key rotation.",
         "parameters": [
           {
             "name": "id",
@@ -224,7 +237,100 @@
             }
           },
           "404": {
-            "description": "No order with this id for this API key.",
+            "description": "No order with this id for this merchant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Order not found."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
+          }
+        }
+      }
+    },
+    "/api/merchant/orders/status": {
+      "get": {
+        "tags": [
+          "Orders"
+        ],
+        "operationId": "getOrderStatusByMerchantOrderRef",
+        "summary": "Query order status by merchant order reference",
+        "description": "Returns the latest order the merchant created with the given merchantOrderRef, with its lifecycle stage and milestone timestamps. Same authentication, signature and rate-limit rules as the other merchant GET endpoints; sign the path including the query string.",
+        "parameters": [
+          {
+            "name": "merchantOrderRef",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "The merchantOrderRef sent at order creation (URL-encoded).",
+            "example": "INV-10045"
+          },
+          {
+            "$ref": "#/components/parameters/Timestamp"
+          },
+          {
+            "$ref": "#/components/parameters/Signature"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OrderStatusResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "merchantOrderRef missing or empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Provide an order id or a merchantOrderRef."
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No order with this merchantOrderRef for this merchant.",
             "content": {
               "application/json": {
                 "schema": {
@@ -343,7 +449,7 @@
           "type": "string",
           "maxLength": 100
         },
-        "description": "Unique per order attempt and API key. A repeat returns the original order; request bodies are not compared."
+        "description": "Unique per order attempt and API key. A repeat with the same terms returns the original order; a repeat with different terms (orderType, amount, walletType, currency, merchantOrderRef, customerAccountNumber) returns 422."
       }
     },
     "schemas": {
@@ -375,6 +481,7 @@
       "OrderStatus": {
         "type": "string",
         "enum": [
+          "Awaiting",
           "Queued",
           "AwaitingCustomerPayment",
           "AwaitingMemberConfirmation",
@@ -390,7 +497,93 @@
           "Frozen",
           "Confirmed"
         ],
-        "description": "Final success: Completed (legacy Confirmed). Final failure: Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto. Others are in progress."
+        "description": "Final success: Completed (legacy Confirmed). Final failure: Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto. Others are in progress (Awaiting = accepted, waiting for an eligible member)."
+      },
+      "OrderStage": {
+        "type": "string",
+        "enum": [
+          "Awaiting",
+          "Assigned",
+          "Sent",
+          "Approved",
+          "Rejected",
+          "Completed",
+          "Failed"
+        ],
+        "description": "Canonical lifecycle stage: Awaiting \u2192 Assigned \u2192 Sent \u2192 Approved / Rejected \u2192 Completed / Failed. Approved/Rejected currently happen in the same step as Completed/Failed, so the current stage is normally one of the other five."
+      },
+      "OrderLifecycle": {
+        "type": "object",
+        "description": "Current stage and when each milestone was reached (ISO 8601 UTC; null = not reached).",
+        "required": [
+          "stage",
+          "createdAt"
+        ],
+        "properties": {
+          "stage": {
+            "$ref": "#/components/schemas/OrderStage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "awaitingAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the order started waiting for an eligible member."
+          },
+          "assignedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a member was assigned."
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Deposit: customer submitted payment. Withdrawal: member sent the payout."
+          },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the member approved."
+          },
+          "rejectedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the member rejected."
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the order settled."
+          },
+          "failedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the order ended without settlement."
+          }
+        }
       },
       "CreateOrderRequest": {
         "type": "object",
@@ -406,7 +599,8 @@
           "amount": {
             "type": "number",
             "exclusiveMinimum": 0,
-            "example": 1500
+            "example": 1500,
+            "description": "At most 4 decimal places and less than 100,000,000,000,000."
           },
           "walletType": {
             "$ref": "#/components/schemas/WalletType"
@@ -419,7 +613,8 @@
               "string",
               "null"
             ],
-            "maxLength": 200
+            "maxLength": 200,
+            "description": "Optional. One live (in progress or completed) order per reference per merchant; a reference whose earlier order failed can be reused. Queryable via GET /api/merchant/orders/status."
           },
           "customerReference": {
             "type": [
@@ -443,7 +638,7 @@
             ],
             "format": "uri",
             "maxLength": 500,
-            "description": "Absolute http(s) URL for this order's webhooks; defaults to the Merchant Portal setting."
+            "description": "Absolute http(s) URL for this order's webhooks; defaults to the Merchant Portal setting. Must resolve to a public internet address (loopback, private and link-local addresses are refused at delivery); redirects are not followed."
           },
           "successUrl": {
             "type": [
@@ -514,6 +709,15 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/OrderStage"
+          },
+          "merchantOrderRef": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -557,6 +761,31 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "merchantOrderRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderType": {
+            "$ref": "#/components/schemas/OrderType"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "fee": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Merchant fee, fixed when the order was accepted (deposit: re-quoted if the customer pays with a different wallet type; capped at the deposit amount)."
+          },
+          "stage": {
+            "$ref": "#/components/schemas/OrderStage"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/OrderLifecycle"
           }
         }
       },

@@ -82,7 +82,7 @@ Send these two headers in addition to `Authorization`:
 |------|------|
 | `timestamp` | The exact value of `X-C2C-Timestamp`, as an integer number of seconds. No decimals, no sign, no milliseconds. |
 | `METHOD` | The HTTP method in uppercase: `POST`, `GET`. |
-| `path` | The request path, starting with `/`, **plus the query string if there is one** (for example `/api/merchant/orders`). No scheme, host or port. Case-sensitive. Use it exactly as sent: do not add or remove a trailing slash. The current merchant endpoints use no query parameters. |
+| `path` | The request path, starting with `/`, **plus the query string if there is one** (for example `/api/merchant/orders`). No scheme, host or port. Case-sensitive. Use it exactly as sent: do not add or remove a trailing slash. Only [Query order status by `merchantOrderRef`](/api-reference/endpoints/query-order-status#query-by-merchantorderref) uses one: sign `/api/merchant/orders/status?merchantOrderRef=INV-10045`, URL-encoded exactly as sent. |
 | `bodyHash` | SHA-256 of the **raw bytes on the wire**, encoded UTF-8, in lowercase hex. |
 
 ### How the body is covered

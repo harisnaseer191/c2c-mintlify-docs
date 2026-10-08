@@ -10,6 +10,8 @@ Creates a **deposit**: your customer pays money into an account held by a C2C me
 
 C2C assigns an available member when the order is created and returns a `paymentPageUrl`. Redirect your customer to that hosted page. There they pick their wallet, see the account to pay, send the money from their wallet app, and enter the last digits of the transaction ID. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
 
+The order is **always accepted**. If no eligible member is available right now, it's created with status `Awaiting`, and a member is assigned when the customer picks a wallet on the payment page.
+
 | | |
 |---|---|
 | **API key** | Required |
@@ -51,7 +53,7 @@ C2C assigns an available member when the order is created and returns a `payment
 </ParamField>
 
 <ParamField body="amount" type="number" required>
-  Amount the customer pays, in `currency`. Must be greater than `0`. Use up to 4 decimal places.
+  Amount the customer pays, in `currency`. Must be greater than `0`, have at most 4 decimal places and be less than `100,000,000,000,000`.
 
   **Example:** `1500`
 </ParamField>
@@ -67,10 +69,10 @@ C2C assigns an available member when the order is created and returns a `payment
 </ParamField>
 
 <ParamField body="merchantOrderRef" type="string">
-  Your own reference for this order, such as an invoice or cart ID. Up to 200 characters. It is echoed in [webhooks](/guides/webhooks).
+  Your own reference for this order, such as an invoice or cart ID. Up to 200 characters. It is echoed in [webhooks](/guides/webhooks), and you can [query the order by it](/api-reference/endpoints/query-order-status#query-by-merchantorderref).
 
   <Note>
-    C2C doesn't enforce uniqueness on `merchantOrderRef` and you can't look an order up by it. Use the `Idempotency-Key` to prevent duplicates, and the returned `orderId` for status queries.
+    One live order per reference: if an order that is in progress or completed already uses this `merchantOrderRef`, the request is rejected with `409`. A reference whose earlier order failed can be reused. To retry a request, reuse the same `Idempotency-Key` instead. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
   </Note>
 </ParamField>
 
@@ -79,7 +81,7 @@ C2C assigns an available member when the order is created and returns a `payment
 </ParamField>
 
 <ParamField body="callbackUrl" type="string">
-  Absolute `http(s)` URL that receives the `order.completed` / `order.failed` [webhooks](/guides/webhooks) for this order. Up to 500 characters.
+  Absolute `http(s)` URL that receives the `order.completed` / `order.failed` [webhooks](/guides/webhooks) for this order. Up to 500 characters. It must resolve to a public internet address: loopback, private and link-local addresses are refused at delivery time, and redirects aren't followed.
 
   If omitted, C2C uses the default callback URL set in your **Merchant Portal → Settings**. If neither is set, no webhook is sent and you must poll [order status](/api-reference/endpoints/query-order-status).
 </ParamField>
@@ -115,7 +117,13 @@ C2C assigns an available member when the order is created and returns a `payment
       Hosted payment page for this order. Redirect the customer here. The URL is pre-signed and stops working at `expiresAt`. Don't modify it, and don't expose it to anyone other than the paying customer.
     </ResponseField>
     <ResponseField name="status" type="string">
-      Initial status, always `Queued` for a new deposit. See [Order status](/guides/order-status).
+      Initial status: `Queued` when a member was assigned, or `Awaiting` when no eligible member was available yet. See [Order status](/guides/order-status).
+    </ResponseField>
+    <ResponseField name="stage" type="string">
+      Lifecycle stage: `Assigned` or `Awaiting` for a new deposit. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
+    </ResponseField>
+    <ResponseField name="merchantOrderRef" type="string | null">
+      Your `merchantOrderRef`, or `null` if you didn't send one.
     </ResponseField>
     <ResponseField name="orderReference" type="string">
       C2C's human-readable reference, for example `ORD-20261008120620-3f6b`. Quote it to support.
@@ -208,7 +216,23 @@ data = response.json()["data"]
     "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...",
     "status": "Queued",
     "orderReference": "ORD-20261008120620-3f6b",
-    "expiresAt": "2026-10-08T12:21:20.605646Z"
+    "expiresAt": "2026-10-08T12:21:20.605646Z",
+    "stage": "Assigned",
+    "merchantOrderRef": "INV-10045"
+  }
+}
+```
+
+```json 200 Awaiting a member
+{
+  "data": {
+    "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...",
+    "status": "Awaiting",
+    "orderReference": "ORD-20261008120620-3f6b",
+    "expiresAt": "2026-10-08T12:21:20.605646Z",
+    "stage": "Awaiting",
+    "merchantOrderRef": "INV-10045"
   }
 }
 ```
@@ -234,9 +258,15 @@ data = response.json()["data"]
 }
 ```
 
-```json 422 No member available
+```json 409 Reference in use
 {
-  "error": "No eligible member is currently available for this order."
+  "error": "merchantOrderRef 'INV-10045' is already used by order ORD-20261008120620-3f6b. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment."
+}
+```
+
+```json 422 Idempotency-Key reused
+{
+  "error": "This Idempotency-Key was already used for a different order request."
 }
 ```
 </ResponseExample>
@@ -245,28 +275,30 @@ data = response.json()["data"]
 
 | Status | When | Body |
 |--------|------|------|
-| `400` | A field fails validation, for example amount ≤ 0, an unknown currency, an invalid URL or a value that is too long | `{"error": "..."}`. Multiple messages are joined with `; ` |
+| `400` | A field fails validation, for example amount ≤ 0, an amount with more than 4 decimal places or too large, an unknown currency, an invalid URL or a value that is too long | `{"error": "..."}`. Multiple messages are joined with `; ` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown `orderType`/`walletType` value | `application/problem+json` with an `errors` object |
 | `401` | API key missing, invalid or revoked | Empty body |
 | `401` | Signature missing, malformed, expired, invalid or replayed | `{"success": false, "error", "code", "traceId"}` |
 | `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
 | `413` | Body larger than 64 KB | `{"success": false, "error", "code": "PAYLOAD_TOO_LARGE", "traceId"}` |
+| `409` | `merchantOrderRef` is already used by an order that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | The wallet channel is disabled for your account: `JazzCash deposits are disabled for this merchant.` | `{"error": "..."}` |
-| `422` | No member is currently available for this wallet, currency and amount | `{"error": "No eligible member is currently available for this order."}` |
+| `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 | `429` | [Rate limit](/api-reference/rate-limits) exceeded | Empty body |
 
 See [Errors](/api-reference/errors) for the complete error model.
 
 <Tip>
-  A `422` "no eligible member" is temporary: members go online and offline throughout the day. Retry later. If the original request was rejected, you can reuse the same `Idempotency-Key`, because rejected requests don't consume the key. Sign the retry again with a fresh timestamp.
+  If a request was rejected (`400`, `409`, `422` …), you can fix it and reuse the same `Idempotency-Key`, because rejected requests don't consume the key. Sign the retry again with a fresh timestamp.
 </Tip>
 
 ## What happens next
 
 1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes.
-2. The customer pays and submits the transaction digits. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
-3. The member confirms (`Completed`) or rejects (`Rejected`) the payment.
-4. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
+2. If the order is `Awaiting`, a member is assigned when the customer picks a wallet. Until one is online the page shows "Finding an available agent…" and re-checks every 10 seconds.
+3. The customer pays and submits the transaction digits. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
+4. The member confirms (`Completed`) or rejects (`Rejected`) the payment.
+5. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
 
 <Warning>
   Fulfil the purchase only when the order status is `Completed`, never on the creation response.

@@ -1,12 +1,14 @@
 ---
 title: "Query Order Status"
 api: "GET /api/merchant/orders/{id}/status"
-description: "Retrieve the current status of a deposit or withdrawal order by its C2C order ID."
+description: "Retrieve the current status, lifecycle stage and milestone timestamps of a deposit or withdrawal order, by its C2C order ID or your merchantOrderRef."
 ---
 
 ## Overview
 
-Returns the current status and key timestamps of an order created with **the same API key**. Use it to poll for the outcome, to reconcile after a missed webhook, or to confirm a webhook before you fulfil.
+Returns the current status, [lifecycle stage](/guides/order-status#lifecycle-stages) and milestone timestamps of one of **your merchant account's** orders. Use it to poll for the outcome, to reconcile after a missed webhook, or to confirm a webhook before you fulfil.
+
+Lookups are scoped to your merchant account, not to an API key: any of your active API keys can query any of your orders, including orders created before a key rotation. You can look an order up by its `orderId` (this endpoint) or by your `merchantOrderRef` ([see below](#query-by-merchantorderref)).
 
 | | |
 |---|---|
@@ -16,7 +18,7 @@ Returns the current status and key timestamps of an order created with **the sam
 ## Headers
 
 <ParamField header="Authorization" type="string" required>
-  `Bearer mk_live_...`, the **same API key** that created the order.
+  `Bearer mk_live_...`, any of your merchant API keys.
 </ParamField>
 
 <ParamField header="X-C2C-Timestamp" type="string" required>
@@ -33,7 +35,7 @@ Returns the current status and key timestamps of an order created with **the sam
   The `orderId` returned by [Create deposit](/api-reference/endpoints/create-deposit) or [Create withdrawal](/api-reference/endpoints/create-withdrawal), also present in webhooks.
 
   <Note>
-    Orders can only be looked up by `orderId`. Your `merchantOrderRef` and C2C's `orderReference` can't be used here, so always store the `orderId`.
+    C2C's `orderReference` can't be used for lookups. To look an order up by your own reference, use [Query by `merchantOrderRef`](#query-by-merchantorderref).
   </Note>
 </ParamField>
 
@@ -61,6 +63,35 @@ Returns the current status and key timestamps of an order created with **the sam
     </ResponseField>
     <ResponseField name="cancelledAt" type="string | null">
       When the order was explicitly cancelled, otherwise `null`. It stays `null` for `Rejected`, `Expired` and `CancelledTimeout`; check `status` instead.
+    </ResponseField>
+    <ResponseField name="merchantOrderRef" type="string | null">
+      Your `merchantOrderRef` from order creation, or `null`.
+    </ResponseField>
+    <ResponseField name="orderType" type="string">
+      `Deposit` or `Withdrawal`.
+    </ResponseField>
+    <ResponseField name="currency" type="string">
+      Currency code, for example `PKR`.
+    </ResponseField>
+    <ResponseField name="fee" type="number | null">
+      Your merchant fee for this order, fixed when the order was accepted (for a deposit, re-quoted if the customer paid with a different wallet type than requested). `null` if no fee applies.
+    </ResponseField>
+    <ResponseField name="stage" type="string">
+      Canonical lifecycle stage: `Awaiting`, `Assigned`, `Sent`, `Approved`, `Rejected`, `Completed` or `Failed`. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
+    </ResponseField>
+    <ResponseField name="lifecycle" type="object">
+      The stage and when each milestone was reached. Timestamps are ISO 8601 UTC, or `null` if the milestone wasn't reached.
+      <Expandable title="properties">
+        <ResponseField name="stage" type="string">Same as the top-level `stage`.</ResponseField>
+        <ResponseField name="createdAt" type="string">When the order was accepted.</ResponseField>
+        <ResponseField name="awaitingAt" type="string | null">When the order started waiting for an eligible member (`null` if a member was assigned at creation).</ResponseField>
+        <ResponseField name="assignedAt" type="string | null">When a member was assigned.</ResponseField>
+        <ResponseField name="sentAt" type="string | null">Deposit: when the customer submitted their payment. Withdrawal: when the member sent the payout.</ResponseField>
+        <ResponseField name="approvedAt" type="string | null">When the member approved the order.</ResponseField>
+        <ResponseField name="rejectedAt" type="string | null">When the member rejected the order.</ResponseField>
+        <ResponseField name="completedAt" type="string | null">When the order settled.</ResponseField>
+        <ResponseField name="failedAt" type="string | null">When the order ended without settlement.</ResponseField>
+      </Expandable>
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -121,7 +152,23 @@ def get_order_status(order_id: str) -> dict:
     "amount": 1500.0000,
     "queuedAt": "2026-10-08T12:06:20.605646Z",
     "confirmedAt": null,
-    "cancelledAt": null
+    "cancelledAt": null,
+    "merchantOrderRef": "INV-10045",
+    "orderType": "Deposit",
+    "currency": "PKR",
+    "fee": 30.0000,
+    "stage": "Sent",
+    "lifecycle": {
+      "stage": "Sent",
+      "createdAt": "2026-10-08T12:06:20.605646Z",
+      "awaitingAt": null,
+      "assignedAt": "2026-10-08T12:06:20.605646Z",
+      "sentAt": "2026-10-08T12:08:57.402113Z",
+      "approvedAt": null,
+      "rejectedAt": null,
+      "completedAt": null,
+      "failedAt": null
+    }
   }
 }
 ```
@@ -135,7 +182,53 @@ def get_order_status(order_id: str) -> dict:
     "amount": 1500.0000,
     "queuedAt": "2026-10-08T12:06:20.605646Z",
     "confirmedAt": "2026-10-08T12:11:42.118204Z",
-    "cancelledAt": null
+    "cancelledAt": null,
+    "merchantOrderRef": "INV-10045",
+    "orderType": "Deposit",
+    "currency": "PKR",
+    "fee": 30.0000,
+    "stage": "Completed",
+    "lifecycle": {
+      "stage": "Completed",
+      "createdAt": "2026-10-08T12:06:20.605646Z",
+      "awaitingAt": null,
+      "assignedAt": "2026-10-08T12:06:20.605646Z",
+      "sentAt": "2026-10-08T12:08:57.402113Z",
+      "approvedAt": "2026-10-08T12:11:42.118204Z",
+      "rejectedAt": null,
+      "completedAt": "2026-10-08T12:11:42.118204Z",
+      "failedAt": null
+    }
+  }
+}
+```
+
+```json 200 Awaiting withdrawal
+{
+  "data": {
+    "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+    "orderReference": "ORD-20261008120621-a7b8",
+    "status": "Awaiting",
+    "amount": 2000.0000,
+    "queuedAt": "2026-10-08T12:06:21.114502Z",
+    "confirmedAt": null,
+    "cancelledAt": null,
+    "merchantOrderRef": "PAYOUT-20017",
+    "orderType": "Withdrawal",
+    "currency": "PKR",
+    "fee": 40.0000,
+    "stage": "Awaiting",
+    "lifecycle": {
+      "stage": "Awaiting",
+      "createdAt": "2026-10-08T12:06:21.114502Z",
+      "awaitingAt": "2026-10-08T12:06:21.114502Z",
+      "assignedAt": null,
+      "sentAt": null,
+      "approvedAt": null,
+      "rejectedAt": null,
+      "completedAt": null,
+      "failedAt": null
+    }
   }
 }
 ```
@@ -151,15 +244,16 @@ def get_order_status(order_id: str) -> dict:
 
 | Status | Applies to | Meaning | Final? |
 |--------|-----------|---------|--------|
-| `Queued` | Deposit | Created. The customer hasn't chosen a wallet on the payment page yet. | No |
+| `Awaiting` | Both | Accepted, waiting for an eligible member. Deposit: a member is assigned when the customer picks a wallet; if none is assigned before the checkout link expires (15 minutes), it ends `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available, or `CancelledTimeout` after 120 minutes. | No |
+| `Queued` | Deposit | Created with a member assigned. The customer hasn't chosen a wallet on the payment page yet. | No |
 | `AwaitingCustomerPayment` | Deposit | Wallet chosen and account shown. Waiting for the customer to pay and submit the transaction digits. | No |
 | `AwaitingMemberConfirmation` | Deposit | Customer submitted payment. Waiting for the member to verify receipt. | No |
 | `AwaitingMemberPayout` | Withdrawal | Waiting for the member to send the payout. | No |
-| `ManualReview` | Both | Escalated to C2C operations, for example a member confirmation or payout window passed. Resolved by C2C to `Completed` or `Cancelled`. | No |
+| `ManualReview` | Both | Escalated to C2C operations, for example a member confirmation or payout window passed. Resolved by C2C to `Completed` or `Cancelled`, which sends `order.completed` or `order.failed`. Stage `Sent` if the customer had already paid, otherwise `Assigned`. | No |
 | `Completed` | Both | **Success.** Funds received (deposit) or paid out (withdrawal). | **Yes, success** |
 | `Rejected` | Both | The member rejected the order, for example because no matching payment was received. | **Yes, failed** |
-| `Expired` | Deposit | The customer didn't pay before the payment page expired. | **Yes, failed** |
-| `CancelledTimeout` | Deposit | No checkout activity before the queue timeout. | **Yes, failed** |
+| `Expired` | Deposit | The checkout link (15 minutes) expired before the customer paid, including when they never opened it. | **Yes, failed** |
+| `CancelledTimeout` | Both | No eligible member became available in time (`Awaiting` order timed out). | **Yes, failed** |
 | `Cancelled` | Both | Cancelled by C2C or the member. | **Yes, failed** |
 | `CancelledAuto` | Both | Cancelled automatically by the system. | **Yes, failed** |
 
@@ -177,7 +271,8 @@ def get_order_status(order_id: str) -> dict:
 - Poll every **5–10 seconds** while the customer is on the payment page, then back off (for example every minute) for orders waiting on a member.
 - Stop polling once the status is final.
 - Each API key has a [rate limit](/api-reference/rate-limits) of 100 requests per minute across all merchant endpoints. Don't poll many orders in tight loops.
-- After C2C resolves a `ManualReview` order, no webhook is sent, so keep polling those orders at a low frequency until they are final.
+- `ManualReview` sends no webhook until C2C resolves it, so poll those orders at a low frequency until they are final.
+- You can branch on `stage` instead of `status`: `Completed` is success, `Failed` is final without settlement, anything else is in progress.
 
 ```javascript Node.js
 const FINAL = new Set(['Completed', 'Confirmed', 'Rejected', 'Expired', 'CancelledTimeout', 'Cancelled', 'CancelledAuto']);
@@ -200,8 +295,48 @@ async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 
 |--------|------|------|
 | `401` | API key missing, invalid or revoked | Empty body |
 | `401` | Signature rejected (when enforced for this endpoint) | `{"success": false, "error", "code", "traceId"}` |
-| `404` | No order with this ID **for this API key**, including orders created with a different key | `{"error": "Order not found."}` |
+| `404` | No order with this ID for your merchant account | `{"error": "Order not found."}` |
 | `429` | Rate limit exceeded | Empty body |
+
+## Query by `merchantOrderRef`
+
+```http
+GET /api/merchant/orders/status?merchantOrderRef={merchantOrderRef}
+```
+
+Returns the **latest** order your merchant account created with this `merchantOrderRef`, in exactly the same response shape as above. Use it when you didn't get the `orderId` back, for example after a timeout. Authentication, signature and rate-limit rules are the same as for the lookup by ID.
+
+<ParamField query="merchantOrderRef" type="string" required>
+  Your `merchantOrderRef` from order creation. URL-encode it.
+</ParamField>
+
+Sign the path **including the query string**, exactly as sent: `{timestamp}\nGET\n/api/merchant/orders/status?merchantOrderRef=INV-10045\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+```javascript Node.js
+// signRequest(): see the Signature Generation Guide
+async function getOrderStatusByRef(merchantOrderRef) {
+  const path = `/api/merchant/orders/status?merchantOrderRef=${encodeURIComponent(merchantOrderRef)}`;
+  const response = await fetch(`${BASE_URL}${path}`, {
+    headers: {
+      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
+    },
+  });
+  if (!response.ok) throw new Error(`Status query failed: HTTP ${response.status}`);
+  return (await response.json()).data;
+}
+```
+
+| Status | When | Body |
+|--------|------|------|
+| `400` | `merchantOrderRef` missing or empty | `{"error": "Provide an order id or a merchantOrderRef."}` |
+| `401` | API key or signature rejected | As above |
+| `404` | No order with this `merchantOrderRef` for your merchant account | `{"error": "Order not found."}` |
+| `429` | Rate limit exceeded | Empty body |
+
+<Note>
+  A reference can belong to several orders only when the earlier ones failed (see [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules)). This endpoint always returns the most recent one; use the `orderId` to query an older order.
+</Note>
 
 ## Next steps
 

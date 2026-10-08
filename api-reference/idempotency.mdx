@@ -23,13 +23,20 @@ Content-Type: application/json
 | Situation | Result |
 |-----------|--------|
 | New key, order created | `200` with the new order. The key is now bound to that order. |
-| Same key again (same API key) | `200` with the **original** order: same `orderId` and `orderReference`, and the order's **current** `status`. No new order is created. |
-| Same key, but the first request was **rejected** (`400`, `401`, `403`, `413`, `422`, `429`) | Treated as a new key. Rejected requests don't consume the key. |
+| Same key again with the **same terms** (same API key) | `200` with the **original** order: same `orderId` and `orderReference`, and the order's **current** `status` and `stage`. No new order is created. |
+| Same key again with **different terms** (same API key) | `422` `This Idempotency-Key was already used for a different order request.` No order is created or returned. |
+| Same key, but the first request was **rejected** (`400`, `401`, `403`, `409`, `413`, `422`, `429`) | Treated as a new key. Rejected requests don't consume the key. |
 | Same key used with a **different** API key | Treated as a new key. Keys are scoped per API key. |
 
+The **terms** compared are `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` and `customerAccountNumber`. Other fields (for example `callbackUrl` or `metadata`) aren't compared.
+
 <Warning>
-  **C2C doesn't compare request bodies.** If you reuse a key with a *different* amount or customer, you get the *original* order back. No new order is created and no error is returned. Never reuse a key for a different order.
+  Never reuse a key for a different order. A retry must send the same terms as the original request, or it's rejected with `422`. Keys created before this check was introduced aren't checked: reusing one of those returns the original order whatever the terms.
 </Warning>
+
+<Note>
+  The `Idempotency-Key` protects against duplicate *requests*. Your `merchantOrderRef` also protects against duplicate *payments*: only one order that is in progress or completed can use a reference, and a second one is rejected with `409`. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
+</Note>
 
 ## Key rules
 

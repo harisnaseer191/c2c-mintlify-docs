@@ -5,7 +5,7 @@ description: "The C2C-hosted checkout page your customer uses to complete a depo
 
 ## Overview
 
-Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **hosted payment page**. You don't build any payment UI: redirect your customer to the `paymentPageUrl` from the create-order response, and C2C walks them through paying the assigned member.
+Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **hosted payment page**. You don't build any payment UI: redirect your customer to the `paymentPageUrl` from the create-order response, and C2C walks them through paying the assigned member. This works the same for orders accepted as `Awaiting` (no eligible member at creation): the page assigns a member at checkout.
 
 <Info>
   C2C has no separate "initiate checkout" endpoint. Creating a deposit order **is** creating the checkout session: one call returns both the order and its `paymentPageUrl`.
@@ -25,7 +25,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 | Withdrawals | A URL is also returned for withdrawals, but customers don't need to visit it |
 
 <Warning>
-  Redirect the customer as soon as you receive the URL. Don't cache it, email it hours later, or reuse it for another order. If the link expires, create a **new** order with a new `Idempotency-Key`.
+  Redirect the customer as soon as you receive the URL. Don't cache it, email it hours later, or reuse it for another order. If the link expires, the order ends `Expired` (or `CancelledTimeout` if no member was ever assigned) and you receive an `order.failed` webhook. Create a **new** order with a new `Idempotency-Key`; you can reuse the same `merchantOrderRef`.
 </Warning>
 
 ## What your customer sees
@@ -33,6 +33,8 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 <Steps>
   <Step title="Choose a wallet">
     The page shows your merchant name, the amount and the C2C order reference. The customer picks a wallet from those enabled for your account (for example JazzCash or Easypaisa). C2C then reserves the receiving account, and the order moves to `AwaitingCustomerPayment`.
+
+    If the order is `Awaiting`, an online member is assigned at this point. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until an account can be shown or the link expires. The customer must not send money until an account is shown.
   </Step>
   <Step title="Pay">
     The page shows the receiving **account number** and **account holder name**. The customer sends exactly the order amount from their own wallet app.
@@ -46,7 +48,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 </Steps>
 
 <Note>
-  If the assigned member goes offline before the customer chooses a wallet, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change.
+  If the assigned member goes offline before the customer chooses a wallet, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different wallet type than you requested, your fee is re-quoted for that wallet.
 </Note>
 
 ## Returning the customer to your site

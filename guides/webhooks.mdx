@@ -5,10 +5,10 @@ description: "Receive signed callbacks when a deposit or withdrawal completes or
 
 ## Overview
 
-C2C sends an HTTP `POST` to your callback URL when an order reaches certain outcomes, so you don't have to poll. Webhooks are a **notification**. The [order status endpoint](/api-reference/endpoints/query-order-status) remains the source of truth.
+C2C sends an HTTP `POST` to your callback URL when an order reaches a **final** outcome, so you don't have to poll. Webhooks are a **notification**. The [order status endpoint](/api-reference/endpoints/query-order-status) remains the source of truth.
 
 ```text
-Member confirms / rejects ──▶ C2C updates order ──▶ POST {callbackUrl}  (signed)
+Order becomes final ──▶ C2C updates order ──▶ POST {callbackUrl}  (signed)
                                                      │
                                          your endpoint returns 2xx
                                                      │
@@ -26,21 +26,26 @@ The URL is **fixed when the order is created**. Changing your portal setting lat
 
 Use a publicly reachable endpoint that accepts `POST` with a JSON body. `callbackUrl` must be an absolute `http://` or `https://` URL (any other scheme is rejected with `400`). Use **HTTPS** in production.
 
+The URL must resolve to a **public internet address**. Loopback, private, link-local (including `169.254.169.254`) and similar addresses are refused when C2C delivers the webhook: that delivery fails and is retried and recorded like any other failure. Redirects aren't followed, so point the URL at the final endpoint.
+
 ## Events
+
+Webhooks are sent for **final outcomes only**.
 
 | `eventType` | Sent when | `status` in payload |
 |-------------|-----------|---------------------|
-| `order.completed` | The member confirmed the order, either receipt of a deposit or the payout of a withdrawal. **Safe to fulfil.** | `Completed` (or legacy `Confirmed`) |
-| `order.failed` | The member rejected the order | `Rejected` |
-| `order.failed` | The member didn't act in time and the order was escalated for review | `ManualReview` |
+| `order.completed` | The order settled: the member confirmed receipt of a deposit or the payout of a withdrawal, or C2C operations resolved the order as confirmed. **Safe to fulfil.** | `Completed` (or legacy `Confirmed`) |
+| `order.failed` | The order ended without settlement: the member rejected it, the checkout link expired, no member became available in time, or it was cancelled (by C2C operations or automatically) | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto` |
 
-<Warning>
-  **Not every outcome triggers a webhook.** Orders that end as `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto`, and `ManualReview` orders later resolved by C2C, don't send a webhook. Poll the [order status](/api-reference/endpoints/query-order-status) for any order that hasn't reached a final status within your expected time window.
-</Warning>
+Example `reason` values on `order.failed`: `Checkout expired before payment`, `No eligible member became available in time`, the member's rejection reason, or the resolution note from C2C operations.
 
 <Note>
-  `order.failed` with status `ManualReview` doesn't mean the payment failed. The order is still open, and C2C operations will resolve it to `Completed` or `Cancelled`. Don't refund or re-pay the customer until the status is final.
+  `ManualReview` doesn't send a webhook. The order isn't final: it's being handled by C2C operations, and you can see it through [status inquiry](/api-reference/endpoints/query-order-status) (status `ManualReview`). You receive `order.completed` or `order.failed` once it is resolved. Don't refund or re-pay the customer in the meantime.
 </Note>
+
+<Warning>
+  An order that failed can later be **confirmed by C2C operations**, for example after a dispute is resolved. You then receive `order.completed` after the earlier `order.failed`. Always act on the **latest** event, and confirm with a [status query](/api-reference/endpoints/query-order-status).
+</Warning>
 
 ## Request format
 
@@ -50,6 +55,8 @@ Content-Type: application/json; charset=utf-8
 X-C2C-Event: order.completed
 X-C2C-Signature: sha256=5d1f0c2e8b7a...
 X-C2C-Key-Prefix: a1b2c3d4
+X-C2C-Delivery-Id: 48213
+X-C2C-Timestamp: 1791461502
 ```
 
 | Header | Description |
@@ -57,6 +64,12 @@ X-C2C-Key-Prefix: a1b2c3d4
 | `X-C2C-Event` | Event type, the same as `eventType` in the body |
 | `X-C2C-Signature` | `sha256=` + lowercase hex HMAC-SHA256 of the **raw request body**, keyed with your API key's **signing secret** (`sksec_...`) |
 | `X-C2C-Key-Prefix` | Which of your API keys signed it: the 8 characters after `mk_live_` in that key (also shown in the Merchant Portal) |
+| `X-C2C-Delivery-Id` | ID of this delivery. Automatic retries of a delivery keep the same ID; a [resend](#resends-by-c2c-operations) gets a new one. Quote it when you contact C2C support. |
+| `X-C2C-Timestamp` | Unix time (seconds) when **this attempt** was sent. It changes on every retry. |
+
+<Note>
+  `X-C2C-Delivery-Id` and `X-C2C-Timestamp` are informational and are **not** covered by the signature. Only the raw body is signed. Don't use them as the only basis for a security decision.
+</Note>
 
 ### Payload: `order.completed`
 
@@ -66,9 +79,22 @@ X-C2C-Key-Prefix: a1b2c3d4
   "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
   "orderReference": "ORD-20261008120620-3f6b",
   "merchantOrderRef": "INV-10045",
+  "orderType": "Deposit",
   "amount": 1500.0000,
+  "fee": 30.0000,
   "currency": "PKR",
   "status": "Completed",
+  "stage": "Completed",
+  "lifecycle": {
+    "createdAt": "2026-10-08T12:06:20.605646Z",
+    "awaitingAt": null,
+    "assignedAt": "2026-10-08T12:06:20.605646Z",
+    "sentAt": "2026-10-08T12:08:57.402113Z",
+    "approvedAt": "2026-10-08T12:11:42.118204Z",
+    "rejectedAt": null,
+    "completedAt": "2026-10-08T12:11:42.118204Z",
+    "failedAt": null
+  },
   "completedAt": "2026-10-08T12:11:42.118204Z",
   "timestamp": "2026-10-08T12:11:42.5038227Z"
 }
@@ -82,9 +108,21 @@ X-C2C-Key-Prefix: a1b2c3d4
   "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
   "orderReference": "ORD-20261008120621-a7b8",
   "merchantOrderRef": "PAYOUT-20017",
+  "orderType": "Withdrawal",
   "amount": 2000.0000,
   "currency": "PKR",
   "status": "Rejected",
+  "stage": "Failed",
+  "lifecycle": {
+    "createdAt": "2026-10-08T12:06:21.114502Z",
+    "awaitingAt": null,
+    "assignedAt": "2026-10-08T12:06:21.114502Z",
+    "sentAt": null,
+    "approvedAt": null,
+    "rejectedAt": "2026-10-08T12:40:03.0912284Z",
+    "completedAt": null,
+    "failedAt": "2026-10-08T12:40:03.0912284Z"
+  },
   "reason": "Payment not received",
   "timestamp": "2026-10-08T12:40:03.1180412Z"
 }
@@ -96,11 +134,15 @@ X-C2C-Key-Prefix: a1b2c3d4
 | `orderId` | uuid | C2C order ID. Match it against the `orderId` you stored. |
 | `orderReference` | string | C2C's human-readable reference |
 | `merchantOrderRef` | string \| null | Your `merchantOrderRef` from order creation |
+| `orderType` | string | `Deposit` or `Withdrawal` |
 | `amount` | number | Order amount |
+| `fee` | number \| null | `order.completed` only. Your merchant fee for this order, fixed when the order was accepted. |
 | `currency` | string | Currency code, for example `"PKR"` |
 | `status` | string | Order status when the event was sent |
+| `stage` | string | Lifecycle stage: `Completed` or `Failed` on these events. See [lifecycle stages](/guides/order-status#lifecycle-stages). |
+| `lifecycle` | object | When each milestone was reached: `createdAt`, `awaitingAt`, `assignedAt`, `sentAt`, `approvedAt`, `rejectedAt`, `completedAt`, `failedAt`. ISO 8601 UTC, or `null` if not reached. |
 | `completedAt` | string | `order.completed` only. ISO 8601 UTC completion time. |
-| `reason` | string | `order.failed` only. Free-text explanation for humans, for example the member's rejection reason or `Escalated to manual review`. Don't branch on it. |
+| `reason` | string | `order.failed` only. Free-text explanation for humans, for example the member's rejection reason or `Checkout expired before payment`. Don't branch on it. |
 | `timestamp` | string | ISO 8601 UTC time the event was generated. It stays the same on every retry of the same delivery. |
 
 ## Verifying the signature
@@ -232,11 +274,24 @@ A failed delivery is retried with exponential backoff, up to **10 attempts** in 
 | 9 | 4 h 16 min |
 | 10 | not retried; delivery abandoned |
 
-Each retry sends the **identical body** (same `timestamp`). Retries are processed once a minute, so an attempt can arrive up to a minute after the time shown. After the last attempt, [reconcile with the status endpoint](#reconciliation).
+Each retry sends the **identical body** (same `timestamp`) with the same `X-C2C-Delivery-Id`. Retries are processed once a minute, so an attempt can arrive up to a minute after the time shown. After the last attempt, [reconcile with the status endpoint](#reconciliation).
+
+### Newer events replace older ones
+
+If an order produces a newer event while an earlier one is still being retried, the earlier delivery is **superseded**: its retries stop and only the newer event is delivered. For example, if an order fails and C2C operations then resolve it as completed, you receive `order.completed`, and the pending `order.failed` retries stop. A stale outcome never arrives after a newer one.
+
+### Resends by C2C operations
+
+C2C operations can send a webhook again from the admin portal, for example after you fix your endpoint:
+
+- **Retry now** sends a failed delivery again immediately: the same body and the same `X-C2C-Delivery-Id`. Only the latest delivery for an order can be retried.
+- **Resend** sends a **new** delivery for the order's current final outcome. It has a new `X-C2C-Delivery-Id` and a new body `timestamp`, but the same `orderId` and `eventType`.
+
+Both are signed with your current signing secret, like any other attempt. Because a resend is a new delivery, deduplicate on the order and its outcome, not on the delivery ID (see below).
 
 ## Handling duplicates
 
-You **will** sometimes receive the same event more than once, because of retries and network timeouts. Make your handler idempotent:
+You **will** sometimes receive the same event more than once, because of retries, network timeouts and resends by C2C operations. Make your handler idempotent:
 
 ```javascript
 async function processEventOnce(event) {
@@ -252,8 +307,8 @@ async function processEventOnce(event) {
 }
 ```
 
-- Deduplicate on `orderId` + `eventType`.
-- Ignore events for orders you have already finalized.
+- Deduplicate on `orderId` + `eventType`. Don't deduplicate on `X-C2C-Delivery-Id` or the body `timestamp` alone: a resend changes both.
+- Ignore duplicate events for orders you have already finalized, but still act on an `order.completed` that follows an earlier `order.failed` (an order resolved by C2C operations).
 - Before fulfilling, re-check the status with [Query order status](/api-reference/endpoints/query-order-status). This also protects you if your signing secret is ever exposed.
 
 ## Reconciliation
@@ -263,7 +318,7 @@ Run a periodic job, for example every 5–15 minutes, that queries the status of
 - is not yet final in your system, and
 - is older than your expected completion time.
 
-That catches events with no webhook (expired, timed out, cancelled, or resolved after review) and any delivery that never reached you.
+That catches orders still in `ManualReview` and any delivery that never reached you.
 
 ## Best practices
 

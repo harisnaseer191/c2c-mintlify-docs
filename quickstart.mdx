@@ -89,12 +89,16 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
         "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-...&expires=...&signature=...",
         "status": "Queued",
         "orderReference": "ORD-20261008120620-3f6b",
-        "expiresAt": "2026-10-08T12:21:20.605646Z"
+        "expiresAt": "2026-10-08T12:21:20.605646Z",
+        "stage": "Assigned",
+        "merchantOrderRef": "INV-10045"
       }
     }
     ```
 
-    Store `orderId`. If the call times out, retry with the **same** `Idempotency-Key`. You will get the same order back, never a duplicate.
+    Store `orderId`. If the call times out, retry with the **same** `Idempotency-Key` and the same body. You will get the same order back, never a duplicate. You can also look the order up by its `merchantOrderRef`.
+
+    If no member is available right now, the order is still accepted with status `Awaiting`. Redirect the customer as usual: a member is assigned when they pick a wallet.
   </Step>
 
   <Step title="Redirect the customer">
@@ -111,7 +115,7 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
     }
     ```
 
-    Poll until the status is final if you don't use webhooks. Some outcomes, such as an expired payment page, never send a webhook. See [Order status](/guides/order-status).
+    Poll until the status is final if you don't use webhooks. Every final outcome sends a webhook, but an order in `ManualReview` doesn't until C2C resolves it. See [Order status](/guides/order-status).
   </Step>
 </Steps>
 
@@ -130,7 +134,7 @@ await c2c('POST', '/api/merchant/orders', {
 }, { 'Idempotency-Key': 'PAYOUT-20017' });
 ```
 
-Keep your merchant wallet funded. A withdrawal is accepted only if your available balance covers its **amount + fee** plus the withdrawals still in progress, otherwise `422 Insufficient merchant balance`. The debit happens when the member confirms the payout. See the [Withdrawal flow](/guides/withdrawal-flow).
+Keep your merchant wallet funded. A withdrawal is accepted only if your available balance covers its **amount + fee** plus the withdrawals still in progress, otherwise `422 Insufficient merchant balance`. The debit happens when the member confirms the payout. If no member is available, the withdrawal is accepted as `Awaiting` and assigned automatically once one is; its amount + fee stays reserved meanwhile. See the [Withdrawal flow](/guides/withdrawal-flow).
 
 ## Go-live checklist
 
@@ -147,7 +151,8 @@ Keep your merchant wallet funded. A withdrawal is accepted only if your availabl
   </Accordion>
   <Accordion title="Business logic">
     - Fulfil and mark payouts paid only on `Completed`
-    - `ManualReview` treated as pending, never as failed
+    - `Awaiting` and `ManualReview` treated as pending, never as failed
+    - `409` handled: one live order per `merchantOrderRef`
     - Wallet balance monitored before submitting withdrawals; `422 Insufficient merchant balance` handled
     - Customers returned to your site through `successUrl` / `failureUrl`, with the outcome confirmed server-side
   </Accordion>

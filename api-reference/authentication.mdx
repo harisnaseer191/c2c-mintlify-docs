@@ -21,7 +21,7 @@ The C2C Merchant API uses two credentials, issued together:
 A C2C administrator issues API keys for your merchant account, and each key comes with its own signing secret. In the **Merchant Portal** you can see your keys (name, prefix, status, last used) and revoke a key, but you can't create new ones there. Contact C2C to get a key or to rotate one.
 
 - You can hold **more than one active API key** (for example one per backend service). Each key has its own signing secret.
-- Orders and idempotency keys are **scoped to the API key that created them**. A status request made with a different key returns `404`.
+- **Idempotency keys** are scoped to the API key that used them. **Orders** belong to your merchant account: any of your active keys can query their status, including orders created before a key rotation.
 - **Regenerating** your API key issues a new key and secret and **revokes every previously active key** on your account.
 - A revoked key stops working within about **2 minutes**.
 

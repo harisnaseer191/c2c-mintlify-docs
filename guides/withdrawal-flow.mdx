@@ -21,8 +21,8 @@ sequenceDiagram
 
     Merchant->>C2C: POST /api/merchant/orders (Withdrawal, customerAccountNumber, signed, Idempotency-Key)
     C2C->>C2C: Verify API key, signature, request, account rules
-    C2C->>Member: Assign payout (AwaitingMemberPayout)
-    C2C-->>Merchant: orderId, status AwaitingMemberPayout
+    C2C->>Member: Assign payout (AwaitingMemberPayout), or accept as Awaiting until a member is available
+    C2C-->>Merchant: orderId, status, stage
     Member->>Customer: Send payout to customerAccountNumber
     Member->>C2C: Confirm payout
     C2C->>C2C: Completed, debit merchant wallet (amount + fee)
@@ -46,11 +46,16 @@ Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 - `amount`, optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
 - a unique `Idempotency-Key` and a valid signature. Withdrawals are always signature-enforced, and the signature protects the account number and amount from tampering.
 
-C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, channel enabled, and an available member with a matching account whose limit covers the amount. It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees.
+C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, channel enabled, and a `merchantOrderRef` that isn't already used by a payout in progress or completed (`409`). It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees. The fee is fixed when the order is accepted; later fee-rule changes apply to new orders only.
+
+C2C then looks for an available member with a matching account whose limit covers the amount:
+
+- **Member found:** the order starts in `AwaitingMemberPayout` (stage `Assigned`).
+- **No member right now:** the order is still **accepted** as `Awaiting` (stage `Awaiting`). It's assigned automatically as soon as a member becomes available: a member comes online, a member frees capacity, or C2C's once-a-minute background check finds one. While `Awaiting`, its **amount + fee stays reserved** against your balance (it counts as in progress for the funding check and for the Pending amount on your dashboard). If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout`.
 
 ### 3. Member pays out
 
-The order starts in `AwaitingMemberPayout`. The member sees the customer's account and amount in their app, sends the payout, and confirms it.
+Once assigned, the order is in `AwaitingMemberPayout`. The member sees the customer's account and amount in their app, sends the payout, and confirms it.
 
 ### 4. Outcome
 
@@ -59,14 +64,18 @@ The order starts in `AwaitingMemberPayout`. The member sees the customer's accou
 | Member confirms the payout | `Completed` | `order.completed` | − (amount + fee) |
 | Member rejects the order | `Rejected` | `order.failed` | unchanged |
 | Payout window (60 min by default) passes, retries left | stays `AwaitingMemberPayout`, reassigned to another member | none | unchanged |
-| Payout window passes, `maxRetryCount` reached | `ManualReview` | `order.failed` (`reason`: `Escalated to manual review`) | unchanged until resolved |
-| C2C resolves a review | `Completed` / `Cancelled` | none, so poll | per outcome |
+| Payout window passes, `maxRetryCount` reached | `ManualReview` | none until resolved | unchanged until resolved |
+| C2C resolves a review | `Completed` / `Cancelled` | `order.completed` / `order.failed` | per outcome |
+| No member available within 120 minutes (`Awaiting` order) | `CancelledTimeout` | `order.failed` (`reason`: `No eligible member became available in time`) | unchanged, reservation released |
 
 ## Status lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AwaitingMemberPayout: order created
+    [*] --> AwaitingMemberPayout: order created, member assigned
+    [*] --> Awaiting: order created, no eligible member yet
+    Awaiting --> AwaitingMemberPayout: member becomes available
+    Awaiting --> CancelledTimeout: no member within 120 min
     AwaitingMemberPayout --> AwaitingMemberPayout: window passed, reassigned (up to maxRetryCount)
     AwaitingMemberPayout --> Completed: member confirms payout
     AwaitingMemberPayout --> Rejected: member rejects
@@ -76,6 +85,7 @@ stateDiagram-v2
     Completed --> [*]
     Rejected --> [*]
     Cancelled --> [*]
+    CancelledTimeout --> [*]
 ```
 
 ## Example
@@ -143,4 +153,6 @@ def pay_out(payout) -> None:
 - **Validate account numbers** before submitting. C2C sends funds to the account you provide.
 - **Mark the payout as paid only on `Completed`.**
 - **`Rejected` is final:** no money was sent and your wallet isn't debited, so you can create a new withdrawal with a new key if appropriate.
-- **Reconcile** orders that stay in `AwaitingMemberPayout` or `ManualReview` longer than expected.
+- **`Awaiting` is in progress, not failed.** Don't resubmit the payout; it's assigned automatically or ends `CancelledTimeout` after 120 minutes.
+- **One live order per `merchantOrderRef`.** You can reuse a reference only after its earlier payout failed.
+- **Reconcile** orders that stay in `Awaiting`, `AwaitingMemberPayout` or `ManualReview` longer than expected.

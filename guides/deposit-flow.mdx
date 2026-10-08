@@ -21,10 +21,11 @@ sequenceDiagram
     Customer->>Merchant: Checkout
     Merchant->>C2C: POST /api/merchant/orders (Deposit, signed, Idempotency-Key)
     C2C->>C2C: Verify API key, signature, request, account rules
-    C2C->>Member: Assign order (status Queued)
-    C2C-->>Merchant: orderId, paymentPageUrl
+    C2C->>Member: Assign order (status Queued), or accept as Awaiting if no member is eligible
+    C2C-->>Merchant: orderId, paymentPageUrl, status, stage
     Merchant-->>Customer: Redirect to paymentPageUrl
     Customer->>Page: Choose wallet
+    Page->>C2C: Assign an online member now if the order is Awaiting
     Page-->>Customer: Member account to pay (AwaitingCustomerPayment)
     Customer->>Member: Send money from wallet app
     Customer->>Page: Enter last digits of transaction ID (AwaitingMemberConfirmation)
@@ -46,9 +47,14 @@ Your backend calls [Create Deposit Order](/api-reference/endpoints/create-deposi
 3. **Request** valid, otherwise `400`
 4. **Merchant account** active and **IP whitelist** passed, otherwise `403`
 5. **Wallet channel** enabled for deposits on your account, otherwise `422`
-6. An **available member** exists who is online, has an approved account for the wallet, has a limit covering the amount, and has enough balance to back the deposit. Otherwise `422`.
+6. **`merchantOrderRef`** not already used by an order that is in progress or completed, otherwise `409`. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
 
-The order is created as `Queued` with the member already assigned, and the member is notified in their app.
+C2C then looks for an **eligible member**: online, with an approved account for the wallet, a limit covering the amount, and enough balance to back the deposit.
+
+- **Member found:** the order is created as `Queued` (stage `Assigned`) with the member already assigned, and the member is notified in their app.
+- **No member right now:** the order is still **accepted** (`200`) as `Awaiting` (stage `Awaiting`), with the usual `orderId`, `orderReference` and `paymentPageUrl`. A member is assigned when the customer picks a wallet on the payment page.
+
+Your merchant fee is fixed when the order is accepted. It's re-quoted only if the customer pays with a different wallet type than you requested, and it's capped at the deposit amount, so the credit to your wallet is never negative. Later fee-rule changes apply to new orders only.
 
 ### 2. Redirect the customer
 
@@ -56,7 +62,9 @@ Send the customer to `paymentPageUrl` right away. The link is valid for **15 min
 
 ### 3. Customer pays
 
-On the page the customer picks a wallet, sees the account to pay, sends the money from their wallet app, and enters the last digits of the transaction ID. The order moves `Queued` → `AwaitingCustomerPayment` → `AwaitingMemberConfirmation`.
+On the page the customer picks a wallet, sees the account to pay, sends the money from their wallet app, and enters the last digits of the transaction ID. The order moves `Queued` (or `Awaiting`) → `AwaitingCustomerPayment` → `AwaitingMemberConfirmation`.
+
+For an `Awaiting` order, an online member is assigned as soon as the customer picks a wallet, and their account is shown. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds. The customer must not send money until an account is shown.
 
 ### 4. Member confirms
 
@@ -73,9 +81,12 @@ Fulfil the purchase only when the status is `Completed`. If you set `successUrl`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Queued: order created
+    [*] --> Queued: order created, member assigned
+    [*] --> Awaiting: order created, no eligible member yet
+    Awaiting --> AwaitingCustomerPayment: customer chooses wallet, member assigned
+    Awaiting --> CancelledTimeout: no member assigned before the link expired
     Queued --> AwaitingCustomerPayment: customer chooses wallet
-    Queued --> CancelledTimeout: no checkout activity in time
+    Queued --> Expired: checkout link expired
     AwaitingCustomerPayment --> AwaitingMemberConfirmation: customer submits transaction digits
     AwaitingCustomerPayment --> Expired: payment page expired
     AwaitingMemberConfirmation --> Completed: member confirms
@@ -94,10 +105,10 @@ stateDiagram-v2
 |-----------|--------|---------|
 | Member confirms | `Completed` | `order.completed` |
 | Member rejects | `Rejected` | `order.failed` |
-| Member doesn't confirm in time (the customer may already have paid) | `ManualReview` | `order.failed` (`reason`: `Escalated to manual review`) |
-| Customer never opens checkout | `CancelledTimeout` | none, so poll |
-| Customer doesn't pay before the page expires | `Expired` | none, so poll |
-| C2C resolves a review | `Completed` / `Cancelled` | none, so poll |
+| Member doesn't confirm in time (the customer may already have paid) | `ManualReview` | none until resolved, so poll |
+| Customer never opens checkout, or doesn't pay before the link expires (15 minutes) | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
+| No member could be assigned before the link expired (`Awaiting` order) | `CancelledTimeout` | `order.failed` (`reason`: `No eligible member became available in time`) |
+| C2C resolves a review | `Completed` / `Cancelled` | `order.completed` / `order.failed` |
 
 ## Example: complete deposit integration
 
@@ -179,7 +190,8 @@ def on_c2c_order_update(order_id: str) -> None:
 ## Best practices
 
 - **Store `orderId` and your `Idempotency-Key`** with your order before you redirect.
-- **Use webhooks and reconcile:** some outcomes (expiry, timeout, review resolution) send no webhook.
-- **Don't fulfil early:** `Queued`, `AwaitingCustomerPayment` and `AwaitingMemberConfirmation` are all in-progress states.
+- **Use webhooks and reconcile:** every final outcome sends a webhook, but `ManualReview` doesn't until it's resolved, and deliveries can fail.
+- **Don't fulfil early:** `Awaiting`, `Queued`, `AwaitingCustomerPayment` and `AwaitingMemberConfirmation` are all in-progress states.
+- **Redirect `Awaiting` orders as usual.** The payment page assigns a member when the customer picks a wallet.
 - **Treat `ManualReview` as pending.** The customer may have paid, so don't ask them to pay again until C2C resolves it.
-- **Handle `422` gracefully:** "no eligible member" is temporary. Offer another wallet or ask the customer to retry shortly.
+- **One live order per `merchantOrderRef`.** To let the customer try again after a failed order, create a new order (new `Idempotency-Key`); you can reuse the same `merchantOrderRef`.

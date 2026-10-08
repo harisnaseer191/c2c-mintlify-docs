@@ -8,7 +8,7 @@ description: "Create a withdrawal order that pays your customer out to their own
 
 Creates a **withdrawal**: a C2C member sends money from their own account to your customer's account. When the member confirms the payout, the amount plus fees is debited from your merchant wallet.
 
-Before creating the order, C2C checks that your merchant wallet can fund it (see [Funding check](#funding-check)). The member is assigned immediately, and the order starts in `AwaitingMemberPayout`. You don't need to redirect the customer anywhere: their account details are part of the request. See the [Withdrawal flow](/guides/withdrawal-flow) for the full lifecycle.
+Before creating the order, C2C checks that your merchant wallet can fund it (see [Funding check](#funding-check)). If a member is available, they're assigned immediately and the order starts in `AwaitingMemberPayout`. Otherwise the order is still **accepted** with status `Awaiting` and assigned automatically as soon as a member becomes available (see [Awaiting withdrawals](#awaiting-withdrawals)). You don't need to redirect the customer anywhere: their account details are part of the request. See the [Withdrawal flow](/guides/withdrawal-flow) for the full lifecycle.
 
 | | |
 |---|---|
@@ -50,7 +50,7 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 </ParamField>
 
 <ParamField body="amount" type="number" required>
-  Amount the customer receives, in `currency`. Must be greater than `0`.
+  Amount the customer receives, in `currency`. Must be greater than `0`, have at most 4 decimal places and be less than `100,000,000,000,000`.
 
   **Example:** `2000`
 </ParamField>
@@ -74,7 +74,9 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 </ParamField>
 
 <ParamField body="merchantOrderRef" type="string">
-  Your own reference for this payout. Up to 200 characters. It is echoed in [webhooks](/guides/webhooks). Uniqueness isn't enforced.
+  Your own reference for this payout. Up to 200 characters. It is echoed in [webhooks](/guides/webhooks), and you can [query the order by it](/api-reference/endpoints/query-order-status#query-by-merchantorderref).
+
+  One live order per reference: if a payout that is in progress or completed already uses this `merchantOrderRef`, the request is rejected with `409`. A reference whose earlier order failed can be reused. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
 </ParamField>
 
 <ParamField body="customerReference" type="string">
@@ -82,7 +84,7 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 </ParamField>
 
 <ParamField body="callbackUrl" type="string">
-  Absolute `http(s)` URL for this order's [webhooks](/guides/webhooks), up to 500 characters. Defaults to the callback URL in **Merchant Portal → Settings**.
+  Absolute `http(s)` URL for this order's [webhooks](/guides/webhooks), up to 500 characters. Defaults to the callback URL in **Merchant Portal → Settings**. It must resolve to a public internet address: loopback, private and link-local addresses are refused at delivery time, and redirects aren't followed.
 </ParamField>
 
 <ParamField body="maxRetryCount" type="integer" default="3">
@@ -113,7 +115,13 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
       C2C's unique order ID. Store it for [status queries](/api-reference/endpoints/query-order-status) and webhook matching.
     </ResponseField>
     <ResponseField name="status" type="string">
-      Initial status, always `AwaitingMemberPayout` for a new withdrawal.
+      Initial status: `AwaitingMemberPayout` when a member was assigned, or `Awaiting` when no eligible member was available yet.
+    </ResponseField>
+    <ResponseField name="stage" type="string">
+      Lifecycle stage: `Assigned` or `Awaiting` for a new withdrawal. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
+    </ResponseField>
+    <ResponseField name="merchantOrderRef" type="string | null">
+      Your `merchantOrderRef`, or `null` if you didn't send one.
     </ResponseField>
     <ResponseField name="orderReference" type="string">
       C2C's human-readable reference, for example `ORD-20261008120621-a7b8`.
@@ -209,7 +217,23 @@ order_id = response.json()["data"]["orderId"]
     "paymentPageUrl": "https://<payment-page-host>/pay?order_id=d1926af5-053d-4b39-a73b-c82f0d9af656&expires=1791462081&signature=Pq7...",
     "status": "AwaitingMemberPayout",
     "orderReference": "ORD-20261008120621-a7b8",
-    "expiresAt": "2026-10-08T12:21:21.717975Z"
+    "expiresAt": "2026-10-08T12:21:21.717975Z",
+    "stage": "Assigned",
+    "merchantOrderRef": "PAYOUT-20017"
+  }
+}
+```
+
+```json 200 Awaiting a member
+{
+  "data": {
+    "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=d1926af5-053d-4b39-a73b-c82f0d9af656&expires=1791462081&signature=Pq7...",
+    "status": "Awaiting",
+    "orderReference": "ORD-20261008120621-a7b8",
+    "expiresAt": "2026-10-08T12:21:21.717975Z",
+    "stage": "Awaiting",
+    "merchantOrderRef": "PAYOUT-20017"
   }
 }
 ```
@@ -241,9 +265,9 @@ order_id = response.json()["data"]["orderId"]
 }
 ```
 
-```json 422 No member available
+```json 409 Reference in use
 {
-  "error": "No eligible member is currently available for this order."
+  "error": "merchantOrderRef 'PAYOUT-20017' is already used by order ORD-20261008120621-a7b8. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment."
 }
 ```
 </ResponseExample>
@@ -252,15 +276,16 @@ order_id = response.json()["data"]["orderId"]
 
 | Status | When | Body |
 |--------|------|------|
-| `400` | Validation failed, for example `customerAccountNumber` missing or too long, amount ≤ 0, or an unknown currency | `{"error": "..."}` |
+| `400` | Validation failed, for example `customerAccountNumber` missing or too long, amount ≤ 0, an amount with more than 4 decimal places or too large, or an unknown currency | `{"error": "..."}` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown enum value | `application/problem+json` |
 | `401` | API key missing, invalid or revoked | Empty body |
 | `401` | Signature missing, malformed, expired, invalid or replayed | `{"success": false, "error", "code", "traceId"}` |
 | `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
 | `413` | Body larger than 64 KB | `{"code": "PAYLOAD_TOO_LARGE", ...}` |
+| `409` | `merchantOrderRef` is already used by a payout that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | Your available balance can't cover this payout plus fee and the withdrawals already in progress | `{"error": "Insufficient merchant balance: ..."}` |
 | `422` | The wallet channel is disabled for withdrawals on your account | `{"error": "..."}` |
-| `422` | No member can currently pay out this wallet type and amount | `{"error": "No eligible member is currently available for this order."}` |
+| `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 | `429` | [Rate limit](/api-reference/rate-limits) exceeded | Empty body |
 
 ## Funding check
@@ -269,23 +294,33 @@ A withdrawal is accepted only if your **available balance** covers:
 
 ```text
 this payout's amount + its fee
-+ amount + fee of every withdrawal still in progress (AwaitingMemberPayout, ManualReview)
++ amount + fee of every withdrawal still in progress (Awaiting, AwaitingMemberPayout, ManualReview)
 ```
 
 Otherwise the request fails with `422 Insufficient merchant balance: …`, and no order is created. Top up your wallet, or wait for in-progress payouts to finish, then retry. You can reuse the same `Idempotency-Key`, because rejected requests don't consume it.
 
-Fees come from the fee rules C2C configures for your account. The **amount + fee** is debited when the member confirms the payout. That confirmation always completes, because the customer has already been paid; if fee rules changed in between, the debit can take your balance slightly below zero. Check balances with [Query wallet balance](/api-reference/endpoints/query-balance).
+Fees come from the fee rules C2C configures for your account. The fee is **fixed when the order is accepted**; later fee-rule changes apply to new orders only. The **amount + fee** is debited when the member confirms the payout. Check balances with [Query wallet balance](/api-reference/endpoints/query-balance).
+
+## Awaiting withdrawals
+
+When no eligible member is available, the withdrawal is accepted with status `Awaiting` (stage `Awaiting`). It's assigned automatically as soon as a member becomes available: a member comes online, a member frees capacity, or C2C's once-a-minute background check finds one. It then continues as `AwaitingMemberPayout`.
+
+- While `Awaiting`, its **amount + fee stays reserved** against your balance: it counts as in progress for the funding check and for the Pending amount on your dashboard.
+- If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout` and you receive an `order.failed` webhook (`reason`: `No eligible member became available in time`). Nothing is debited.
 
 ## Payout lifecycle
 
 ```text
+Awaiting ──member available──▶ AwaitingMemberPayout
+   └──no member within 120 min──▶ CancelledTimeout (order.failed webhook)
+
 AwaitingMemberPayout ──member confirms payout──▶ Completed      (order.completed webhook)
         │
         ├──member rejects────────────────────────▶ Rejected       (order.failed webhook)
         │
         └──payout window passes (60 min default)
               ├── retries left → reassigned to another member (stays AwaitingMemberPayout)
-              └── no retries left → ManualReview (order.failed webhook, reason "Escalated to manual review")
+              └── no retries left → ManualReview (no webhook until C2C resolves it)
 ```
 
 <Warning>

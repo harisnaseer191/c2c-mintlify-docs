@@ -10,7 +10,7 @@ Returns the current balance of your merchant wallet. The merchant is identified 
 
 | Event | Effect on available balance |
 |-------|-----------------------------|
-| Deposit order `Completed` | **+ amount − fee** |
+| Deposit order `Completed` | **+ amount − fee** (the fee is capped at the deposit amount, so the credit is never negative) |
 | Withdrawal order `Completed` | **− (amount + fee)** |
 | Balance adjustment by C2C, for example a top-up or correction | As recorded by C2C |
 

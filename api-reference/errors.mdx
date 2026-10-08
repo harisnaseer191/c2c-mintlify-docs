@@ -1,0 +1,135 @@
+---
+title: "Errors"
+description: "HTTP status codes and error response formats returned by the C2C Merchant API."
+---
+
+## Error response formats
+
+The API uses standard HTTP status codes. The body format depends on which layer rejected the request.
+
+<Tabs>
+  <Tab title="Business & validation errors">
+    Most errors (`400`, `403`, `404`, `422`) return a single message:
+
+    ```json
+    {
+      "error": "No eligible member is currently available for this order."
+    }
+    ```
+
+    When several validation rules fail, the messages are joined with `; `.
+  </Tab>
+  <Tab title="Signature errors">
+    Signature failures (`401`) and oversized bodies (`413`) return a machine-readable `code` and a `traceId`:
+
+    ```json
+    {
+      "success": false,
+      "error": "Request signature is missing, malformed, expired, or invalid.",
+      "code": "SIGNATURE_EXPIRED",
+      "traceId": "b46d6b4e36bdcf0b90f5527593af8b46"
+    }
+    ```
+  </Tab>
+  <Tab title="Malformed requests">
+    Requests that can't be parsed or bound (`400`), such as invalid JSON, an unknown enum value or a missing `Idempotency-Key`, return RFC 9110 problem details:
+
+    ```json
+    {
+      "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+      "title": "One or more validation errors occurred.",
+      "status": 400,
+      "errors": {
+        "Idempotency-Key": ["The idempotencyKey field is required."]
+      },
+      "traceId": "08d783466a8cf7d33462b9f43b83ff43"
+    }
+    ```
+  </Tab>
+  <Tab title="Empty body">
+    `401` for a missing or invalid **API key**, and `429` rate limiting, return **no body**. Branch on the status code.
+  </Tab>
+</Tabs>
+
+<Tip>
+  Branch on the **HTTP status** and, for signature errors, on `code`. The `error` text is meant for humans and can change. Always log the `traceId` when one is present and quote it to support.
+</Tip>
+
+## HTTP status codes
+
+| Status | Meaning | Retry? |
+|--------|---------|--------|
+| `200` | Success. For order creation, also returned when an `Idempotency-Key` replay finds the existing order. | – |
+| `400` | Invalid request: validation failed, malformed JSON, unknown enum value or missing `Idempotency-Key` | No. Fix the request first. |
+| `401` | API key missing or invalid (empty body), **or** request signature rejected (`code` in body) | No. Fix the credentials or signature. Re-sign and retry for `SIGNATURE_EXPIRED` / `SIGNATURE_REPLAYED`. |
+| `403` | Merchant account not active, or caller IP not in your whitelist | No. Contact C2C. |
+| `404` | Order not found for this API key | No |
+| `413` | Request body over 64 KB (`PAYLOAD_TOO_LARGE`) | No. Shrink the body. |
+| `422` | Business rule declined the order: wallet channel disabled, insufficient merchant balance (withdrawals), or no member available | Channel disabled: no. Insufficient balance: after a top-up. No member available: **yes, later**. |
+| `429` | Rate limit exceeded (empty body) | **Yes**, with backoff |
+| `500` | Unexpected server error (problem details with `traceId`) | **Yes**, with backoff. For order creation, reuse the same `Idempotency-Key`. |
+
+## Error catalogue
+
+### Authentication and signature
+
+| Status | `code` / message | Cause |
+|--------|------------------|-------|
+| `401` | *(empty body)* | `Authorization` header missing, not a Bearer `mk_` key, or the key is unknown or revoked |
+| `401` | `SIGNATURE_REQUIRED` | `X-C2C-Timestamp` or `X-C2C-Signature` missing |
+| `401` | `SIGNATURE_MALFORMED` | Timestamp isn't whole seconds, or the signature isn't `sha256=` + 64 lowercase hex characters |
+| `401` | `SIGNATURE_EXPIRED` | Timestamp more than 300 seconds from C2C's clock |
+| `401` | `SIGNATURE_INVALID` | Signature doesn't match, or the API key has no signing secret |
+| `401` | `SIGNATURE_REPLAYED` | This exact signed `POST` was already accepted; re-sign retries with a fresh timestamp |
+| `413` | `PAYLOAD_TOO_LARGE` | Body larger than 64 KB |
+
+See the [Signature Generation Guide](/api-reference/signature-guide#common-mistakes-and-troubleshooting) for fixes.
+
+### Order creation (`POST /api/merchant/orders`)
+
+| Status | Message (examples) | Cause |
+|--------|--------------------|-------|
+| `400` | `'Amount' must be greater than '0'.` | Invalid amount |
+| `400` | `Currency must be one of: PKR, INR, BDT.` | Unsupported currency |
+| `400` | `CustomerAccountNumber is required for withdrawal orders.` | Withdrawal without a payout account |
+| `400` | `CallbackUrl must be a valid absolute http(s) URL.` | Not an absolute `http://` / `https://` URL. Same for `SuccessUrl` / `FailureUrl`. |
+| `400` | `'Txn Ref Digits Required' must be between 4 and 8. You entered 3.` | Out-of-range option |
+| `400` | Problem details, `errors.Idempotency-Key` | Header missing |
+| `400` | Problem details, `errors.$.walletType` | Unknown `orderType` / `walletType` value or invalid JSON |
+| `403` | `Merchant account is suspended; new orders are not accepted.` | Account not active |
+| `403` | `IP not in whitelist.` | Your IP whitelist doesn't allow the caller's IP for this order type |
+| `422` | `Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required …` | Withdrawal not covered by your balance, counting fees and withdrawals in progress |
+| `422` | `JazzCash deposits are disabled for this merchant.` | Channel disabled for your account |
+| `422` | `No eligible member is currently available for this order.` | No online member can take this wallet, currency and amount right now |
+
+### Order status and balance
+
+| Status | Message | Cause |
+|--------|---------|-------|
+| `404` | `Order not found.` | Unknown `orderId`, or the order was created with a different API key |
+| `404` | `API key not found or inactive.` | Key revoked while the request was being processed |
+
+## Recommended handling
+
+```javascript Node.js
+async function handle(response) {
+  if (response.ok) return (await response.json()).data;
+
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+
+  switch (response.status) {
+    case 401:
+      // body === null → API key problem; body.code → signature problem
+      throw new Error(body?.code ? `Signature rejected: ${body.code} (trace ${body.traceId})` : 'Invalid API key');
+    case 422:
+      // Temporary when no member is available; permanent when a channel is disabled
+      throw new Error(`Declined: ${body.error}`);
+    case 429:
+    case 500:
+      throw Object.assign(new Error(`Retryable HTTP ${response.status}`), { retryable: true, traceId: body?.traceId });
+    default:
+      throw new Error(`HTTP ${response.status}: ${body?.error ?? body?.title ?? 'request failed'}`);
+  }
+}
+```

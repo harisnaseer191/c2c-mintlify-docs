@@ -1,0 +1,290 @@
+---
+title: "Create Deposit Order"
+api: "POST /api/merchant/orders"
+description: "Create a deposit order and get a hosted payment page URL where your customer completes the payment."
+---
+
+## Overview
+
+Creates a **deposit**: your customer pays money into an account held by a C2C member, and the amount, minus fees, is credited to your merchant wallet once the member confirms receipt.
+
+C2C assigns an available member when the order is created and returns a `paymentPageUrl`. Redirect your customer to that hosted page. There they pick their wallet, see the account to pay, send the money from their wallet app, and enter the last digits of the transaction ID. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
+
+| | |
+|---|---|
+| **API key** | Required |
+| **Signature** | **Required, always enforced.** See the [Signature Generation Guide](/api-reference/signature-guide) |
+| **Idempotency-Key** | Required |
+
+<Info>
+  Deposits and withdrawals use the same endpoint. Set `orderType` to `"Deposit"` to create a deposit.
+</Info>
+
+## Headers
+
+<ParamField header="Authorization" type="string" required>
+  `Bearer mk_live_...`, your merchant API key.
+</ParamField>
+
+<ParamField header="X-C2C-Timestamp" type="string" required>
+  Unix time in seconds when the request was signed. Must be within 300 seconds of C2C's clock.
+</ParamField>
+
+<ParamField header="X-C2C-Signature" type="string" required>
+  `sha256=` + lowercase hex HMAC-SHA256 of `{timestamp}\n{METHOD}\n{path}\n{hex(sha256(body))}`, keyed with your signing secret.
+
+  **Example:** `sha256=c1c7c3f90a1b862cd8d9b8c173e59677d7acff2735a7bd9580ed69e18983558c`
+</ParamField>
+
+<ParamField header="Idempotency-Key" type="string" required>
+  Your unique key for this order attempt, up to 100 characters. Retrying with the same key returns the original order instead of creating a new one. See [Idempotency](/api-reference/idempotency).
+</ParamField>
+
+<ParamField header="Content-Type" type="string" required>
+  `application/json`
+</ParamField>
+
+## Request body
+
+<ParamField body="orderType" type="string" required>
+  Must be `"Deposit"`.
+</ParamField>
+
+<ParamField body="amount" type="number" required>
+  Amount the customer pays, in `currency`. Must be greater than `0`. Use up to 4 decimal places.
+
+  **Example:** `1500`
+</ParamField>
+
+<ParamField body="walletType" type="string" required>
+  The wallet the customer intends to pay with. C2C uses it to assign a member with a matching account. The customer can still switch to another wallet that is enabled for you on the payment page.
+
+  One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
+</ParamField>
+
+<ParamField body="currency" type="string" default="PKR">
+  ISO currency code: `PKR`, `INR` or `BDT`. Defaults to `PKR`.
+</ParamField>
+
+<ParamField body="merchantOrderRef" type="string">
+  Your own reference for this order, such as an invoice or cart ID. Up to 200 characters. It is echoed in [webhooks](/guides/webhooks).
+
+  <Note>
+    C2C doesn't enforce uniqueness on `merchantOrderRef` and you can't look an order up by it. Use the `Idempotency-Key` to prevent duplicates, and the returned `orderId` for status queries.
+  </Note>
+</ParamField>
+
+<ParamField body="customerReference" type="string">
+  Your identifier for the paying customer, for example a player ID. Up to 200 characters.
+</ParamField>
+
+<ParamField body="callbackUrl" type="string">
+  Absolute `http(s)` URL that receives the `order.completed` / `order.failed` [webhooks](/guides/webhooks) for this order. Up to 500 characters.
+
+  If omitted, C2C uses the default callback URL set in your **Merchant Portal → Settings**. If neither is set, no webhook is sent and you must poll [order status](/api-reference/endpoints/query-order-status).
+</ParamField>
+
+<ParamField body="successUrl" type="string">
+  Absolute `http(s)` URL, up to 500 characters. When the order completes, the hosted payment page sends the customer here, with `c2c_order_id`, `c2c_order_reference` and `c2c_status` appended. See [Returning the customer](/guides/hosted-payment-page#returning-the-customer-to-your-site).
+</ParamField>
+
+<ParamField body="failureUrl" type="string">
+  Absolute `http(s)` URL, up to 500 characters. Where the hosted payment page sends the customer when the order is rejected, expires or is cancelled. The same parameters are appended.
+</ParamField>
+
+<ParamField body="metadata" type="string">
+  Free-form string, for example JSON-encoded, stored with the order for reconciliation. Up to 1000 characters. It isn't returned in API responses or webhooks.
+</ParamField>
+
+<ParamField body="txnRefDigitsRequired" type="integer" default="4">
+  How many trailing digits of the wallet transaction ID the customer must enter on the payment page. `4` to `8`.
+</ParamField>
+
+<ParamField body="maxRetryCount" type="integer" default="3">
+  `0` to `10`. Only used by withdrawals: it limits how often C2C reassigns an order to another member. It has no effect on deposits.
+</ParamField>
+
+## Response
+
+<ResponseField name="data" type="object">
+  <Expandable title="properties" defaultOpen>
+    <ResponseField name="orderId" type="uuid">
+      C2C's unique order ID. **Store it.** You need it for [status queries](/api-reference/endpoints/query-order-status), and it is the `orderId` in webhooks.
+    </ResponseField>
+    <ResponseField name="paymentPageUrl" type="string">
+      Hosted payment page for this order. Redirect the customer here. The URL is pre-signed and stops working at `expiresAt`. Don't modify it, and don't expose it to anyone other than the paying customer.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Initial status, always `Queued` for a new deposit. See [Order status](/guides/order-status).
+    </ResponseField>
+    <ResponseField name="orderReference" type="string">
+      C2C's human-readable reference, for example `ORD-20261008120620-3f6b`. Quote it to support.
+    </ResponseField>
+    <ResponseField name="expiresAt" type="string">
+      ISO 8601 UTC time when the payment page link expires, **15 minutes** after creation.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```bash cURL
+# TIMESTAMP / SIGNATURE: see the Signature Generation Guide
+BODY='{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345"}'
+
+curl --request POST \
+  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
+  --header "Authorization: Bearer $C2C_API_KEY" \
+  --header "Content-Type: application/json" \
+  --header "Idempotency-Key: INV-10045-attempt-1" \
+  --header "X-C2C-Timestamp: $TIMESTAMP" \
+  --header "X-C2C-Signature: $SIGNATURE" \
+  --data "$BODY"
+```
+
+```javascript Node.js
+// signRequest(): see the Signature Generation Guide
+const path = '/api/merchant/orders';
+const body = JSON.stringify({
+  orderType: 'Deposit',
+  amount: 1500,
+  currency: 'PKR',
+  walletType: 'JazzCash',
+  merchantOrderRef: 'INV-10045',
+  customerReference: 'player_12345',
+});
+
+const response = await fetch(
+  `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'INV-10045-attempt-1',
+      ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
+    },
+    body,
+  }
+);
+
+const { data } = await response.json();
+// Persist data.orderId, then redirect the customer to data.paymentPageUrl
+```
+
+```python Python
+import json, os, requests
+
+# sign_request(): see the Signature Generation Guide
+path = "/api/merchant/orders"
+body = json.dumps({
+    "orderType": "Deposit",
+    "amount": 1500,
+    "currency": "PKR",
+    "walletType": "JazzCash",
+    "merchantOrderRef": "INV-10045",
+    "customerReference": "player_12345",
+}, separators=(",", ":"))
+
+response = requests.post(
+    f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
+    data=body.encode("utf-8"),
+    headers={
+        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "INV-10045-attempt-1",
+        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
+    },
+)
+data = response.json()["data"]
+# Persist data["orderId"], then redirect the customer to data["paymentPageUrl"]
+```
+</RequestExample>
+
+<ResponseExample>
+```json 200 OK
+{
+  "data": {
+    "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...",
+    "status": "Queued",
+    "orderReference": "ORD-20261008120620-3f6b",
+    "expiresAt": "2026-10-08T12:21:20.605646Z"
+  }
+}
+```
+
+```json 400 Validation error
+{
+  "error": "'Amount' must be greater than '0'."
+}
+```
+
+```json 401 Signature
+{
+  "success": false,
+  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "code": "SIGNATURE_INVALID",
+  "traceId": "5b269362496001a7ed102e2d8cc50329"
+}
+```
+
+```json 403 Forbidden
+{
+  "error": "IP not in whitelist."
+}
+```
+
+```json 422 No member available
+{
+  "error": "No eligible member is currently available for this order."
+}
+```
+</ResponseExample>
+
+## Error responses
+
+| Status | When | Body |
+|--------|------|------|
+| `400` | A field fails validation, for example amount ≤ 0, an unknown currency, an invalid URL or a value that is too long | `{"error": "..."}`. Multiple messages are joined with `; ` |
+| `400` | `Idempotency-Key` missing, malformed JSON, or an unknown `orderType`/`walletType` value | `application/problem+json` with an `errors` object |
+| `401` | API key missing, invalid or revoked | Empty body |
+| `401` | Signature missing, malformed, expired, invalid or replayed | `{"success": false, "error", "code", "traceId"}` |
+| `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
+| `413` | Body larger than 64 KB | `{"success": false, "error", "code": "PAYLOAD_TOO_LARGE", "traceId"}` |
+| `422` | The wallet channel is disabled for your account: `JazzCash deposits are disabled for this merchant.` | `{"error": "..."}` |
+| `422` | No member is currently available for this wallet, currency and amount | `{"error": "No eligible member is currently available for this order."}` |
+| `429` | [Rate limit](/api-reference/rate-limits) exceeded | Empty body |
+
+See [Errors](/api-reference/errors) for the complete error model.
+
+<Tip>
+  A `422` "no eligible member" is temporary: members go online and offline throughout the day. Retry later. If the original request was rejected, you can reuse the same `Idempotency-Key`, because rejected requests don't consume the key. Sign the retry again with a fresh timestamp.
+</Tip>
+
+## What happens next
+
+1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes.
+2. The customer pays and submits the transaction digits. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
+3. The member confirms (`Completed`) or rejects (`Rejected`) the payment.
+4. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
+
+<Warning>
+  Fulfil the purchase only when the order status is `Completed`, never on the creation response.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Deposit flow" icon="diagram-project" href="/guides/deposit-flow">
+    Full lifecycle, statuses and timeouts
+  </Card>
+  <Card title="Query order status" icon="magnifying-glass" href="/api-reference/endpoints/query-order-status">
+    Track the order to completion
+  </Card>
+  <Card title="Hosted payment page" icon="window-maximize" href="/guides/hosted-payment-page">
+    What your customer sees
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Get notified when the order completes
+  </Card>
+</CardGroup>

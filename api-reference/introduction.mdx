@@ -1,0 +1,149 @@
+---
+title: 'Introduction'
+description: 'Reference for the C2C Merchant API — create deposit and withdrawal orders, track their status, and check your wallet balance.'
+---
+
+## Welcome to the C2C Merchant API
+
+The C2C Merchant API lets your backend accept **deposits** from and send **withdrawals** to customers' Pakistani mobile wallets, without integrating with each wallet provider yourself. C2C routes every order to a verified member who holds an account with the same provider. The member receives the customer's payment (deposit) or sends the payout (withdrawal) and confirms it, and C2C settles the result to your merchant wallet.
+
+The API is REST over HTTPS with JSON request and response bodies, and uses standard HTTP status codes.
+
+<Note>
+  Every request is authenticated with your API key **and signed** with your signing secret. Deposit and withdrawal creation **always** reject unsigned requests. See [Authentication](/api-reference/authentication) and the [Signature Generation Guide](/api-reference/signature-guide).
+</Note>
+
+## Base URL
+
+```
+https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io
+```
+
+All paths in this reference are relative to the base URL, for example `POST /api/merchant/orders`.
+
+## Environments
+
+| Environment | Base URL | Notes |
+|-------------|----------|-------|
+| Development / integration | `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io` | Use while building and testing your integration |
+| Production | Provided by C2C during onboarding | Issued together with your production API key |
+
+<Warning>
+  API keys and signing secrets are issued **per environment**. A key from one environment will be rejected by another. There is no separate test-key prefix: every key starts with `mk_live_`.
+</Warning>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Deposits" icon="arrow-down-to-line" href="/api-reference/endpoints/create-deposit">
+    Collect payments. Your customer pays an assigned member's wallet through a C2C-hosted payment page.
+  </Card>
+  <Card title="Withdrawals" icon="arrow-up-from-line" href="/api-reference/endpoints/create-withdrawal">
+    Pay customers out to their own mobile wallet. A member sends the funds and confirms the transfer.
+  </Card>
+  <Card title="Order status" icon="magnifying-glass" href="/api-reference/endpoints/query-order-status">
+    Track every order from creation to a final status.
+  </Card>
+  <Card title="Wallet balance" icon="wallet" href="/api-reference/endpoints/query-balance">
+    Check the available and frozen funds in your C2C merchant wallet.
+  </Card>
+  <Card title="Signed requests" icon="signature" href="/api-reference/signature-guide">
+    HMAC-SHA256 request signing proves each request came from you and was not tampered with.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Receive a signed callback when an order completes or fails.
+  </Card>
+</CardGroup>
+
+## API capabilities
+
+| Capability | Method & path | Signature |
+|------------|---------------|-----------|
+| [Query wallet balance](/api-reference/endpoints/query-balance) | `GET /api/merchant/orders/balance` | Sign every request |
+| [Create deposit order](/api-reference/endpoints/create-deposit) | `POST /api/merchant/orders` with `"orderType": "Deposit"` | **Always enforced** |
+| [Create withdrawal order](/api-reference/endpoints/create-withdrawal) | `POST /api/merchant/orders` with `"orderType": "Withdrawal"` | **Always enforced** |
+| [Query order status](/api-reference/endpoints/query-order-status) | `GET /api/merchant/orders/{id}/status` | Sign every request |
+
+Deposits and withdrawals share a single endpoint. The `orderType` field decides which flow the order follows.
+
+<Info>
+  **Not part of the C2C API:** refunds, settlements, hosted checkout as a separate endpoint, and direct wallet charging (OTP/token). Hosted checkout is built into deposits: every deposit returns a `paymentPageUrl`. See [Hosted payment page](/guides/hosted-payment-page).
+</Info>
+
+## Supported wallets and currencies
+
+| `walletType` | Description |
+|--------------|-------------|
+| `JazzCash` | JazzCash mobile wallet |
+| `Easypaisa` | Easypaisa mobile wallet |
+| `TillID` | Till ID (QR / merchant till) |
+| `BankAccount` | Bank account transfer |
+
+| `currency` | Notes |
+|------------|-------|
+| `PKR` | Default when omitted |
+| `INR`, `BDT` | Accepted by the API. An order succeeds only when members are available in that currency. |
+
+Which wallets are enabled for deposits and withdrawals is configured **per merchant**. If a channel is disabled for your account, order creation returns `422`.
+
+## Request and response format
+
+- Send `Content-Type: application/json` on requests that have a body.
+- Enum fields such as `orderType`, `walletType`, `currency` and `status` are sent and returned as **strings** (for example `"Deposit"`). Integer values are also accepted on input but are not recommended.
+- Monetary amounts are decimal numbers in the order currency (for example `1500` or `1500.50`).
+- Timestamps are ISO 8601 in UTC (for example `2026-10-08T12:21:20.605646Z`).
+- Successful responses wrap the result in a `data` object:
+
+```json
+{
+  "data": { "...": "..." }
+}
+```
+
+Error responses are described in [Errors](/api-reference/errors).
+
+## Integration at a glance
+
+<Steps>
+  <Step title="Get your credentials">
+    C2C issues your **API key** (`mk_live_...`) and **signing secret** (`sksec_...`). Each is shown only once.
+  </Step>
+  <Step title="Authenticate and sign">
+    Send `Authorization: Bearer <api key>` and sign each request with `X-C2C-Timestamp` and `X-C2C-Signature`.
+  </Step>
+  <Step title="Create a deposit or withdrawal">
+    `POST /api/merchant/orders` with a unique `Idempotency-Key`. Store the returned `orderId`.
+  </Step>
+  <Step title="Redirect (deposits only)">
+    Send your customer to the returned `paymentPageUrl` to complete the payment.
+  </Step>
+  <Step title="Get the outcome">
+    Receive the `order.completed` / `order.failed` [webhook](/guides/webhooks) and/or poll [order status](/api-reference/endpoints/query-order-status) until the order reaches a final status.
+  </Step>
+</Steps>
+
+## OpenAPI specification
+
+A machine-readable OpenAPI 3.1 description of the merchant endpoints is published alongside these docs as [`openapi.json`](/openapi.json). Use it to generate a client or import the endpoints into Postman.
+
+## Support
+
+- Email: [support@c2cplatform.com](mailto:support@c2cplatform.com)
+- Always include the `traceId` from an error response. It identifies the exact request in C2C's logs.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api-reference/authentication">
+    Send your API key with each request
+  </Card>
+  <Card title="Signature Generation Guide" icon="signature" href="/api-reference/signature-guide">
+    Sign requests in C#, Node.js, Python or PHP
+  </Card>
+  <Card title="Create a deposit" icon="arrow-down-to-line" href="/api-reference/endpoints/create-deposit">
+    Collect your first payment
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    End-to-end integration in a few steps
+  </Card>
+</CardGroup>

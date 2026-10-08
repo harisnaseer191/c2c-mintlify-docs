@@ -1,0 +1,100 @@
+---
+title: "Hosted Payment Page"
+description: "The C2C-hosted checkout page your customer uses to complete a deposit."
+---
+
+## Overview
+
+Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **hosted payment page**. You don't build any payment UI: redirect your customer to the `paymentPageUrl` from the create-order response, and C2C walks them through paying the assigned member.
+
+<Info>
+  C2C has no separate "initiate checkout" endpoint. Creating a deposit order **is** creating the checkout session: one call returns both the order and its `paymentPageUrl`.
+</Info>
+
+## The payment page URL
+
+```text
+https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signature=Xk3...
+```
+
+| Property | Detail |
+|----------|--------|
+| Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
+| Lifetime | **15 minutes** from order creation (`expiresAt` in the response) |
+| Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
+| Withdrawals | A URL is also returned for withdrawals, but customers don't need to visit it |
+
+<Warning>
+  Redirect the customer as soon as you receive the URL. Don't cache it, email it hours later, or reuse it for another order. If the link expires, create a **new** order with a new `Idempotency-Key`.
+</Warning>
+
+## What your customer sees
+
+<Steps>
+  <Step title="Choose a wallet">
+    The page shows your merchant name, the amount and the C2C order reference. The customer picks a wallet from those enabled for your account (for example JazzCash or Easypaisa). C2C then reserves the receiving account, and the order moves to `AwaitingCustomerPayment`.
+  </Step>
+  <Step title="Pay">
+    The page shows the receiving **account number** and **account holder name**. The customer sends exactly the order amount from their own wallet app.
+  </Step>
+  <Step title="Confirm the transfer">
+    The customer enters the **last digits of the transaction ID** from their wallet app. The order's `txnRefDigitsRequired` sets how many digits (4 by default). The order moves to `AwaitingMemberConfirmation`.
+  </Step>
+  <Step title="Wait for verification">
+    The page waits while the member verifies the payment, and updates by itself to a success or a cancelled/expired screen. If you set `successUrl` / `failureUrl`, it then sends the customer back to your site.
+  </Step>
+</Steps>
+
+<Note>
+  If the assigned member goes offline before the customer chooses a wallet, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change.
+</Note>
+
+## Returning the customer to your site
+
+Set `successUrl` and `failureUrl` when you [create the deposit](/api-reference/endpoints/create-deposit). When the order reaches a final status while the customer still has the page open, the page shows the result, then sends the customer back to you after **5 seconds**. A "Return now" link lets them go back straight away.
+
+| Final status | Customer is sent to |
+|--------------|---------------------|
+| `Completed` (or legacy `Confirmed`) | `successUrl` |
+| `Rejected`, `Expired`, `Cancelled`, `CancelledAuto`, `CancelledTimeout` | `failureUrl` |
+
+C2C appends the outcome to the URL, keeping your existing query parameters:
+
+```text
+https://merchant.example.com/payment/done?c2c_order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&c2c_order_reference=ORD-20261008120620-3f6b&c2c_status=Completed
+```
+
+<Warning>
+  These parameters come through the customer's browser and can be edited. Use `c2c_order_id` only to know **which** order to show. Before fulfilling, confirm the status from your backend with a [webhook](/guides/webhooks) or a [status query](/api-reference/endpoints/query-order-status).
+</Warning>
+
+Both URLs must be absolute `http://` or `https://` URLs. Any other scheme, such as `javascript:`, is rejected with `400` when the order is created.
+
+The redirect only happens if the customer keeps the page open until the order is final. A member can take a while to confirm, so also give customers a way back of their own: for example a "Check my order" page on your site, or open `paymentPageUrl` in a new tab while your page polls your backend.
+
+## Integration example
+
+```javascript Node.js (Express)
+app.post('/checkout/c2c', async (req, res) => {
+  const cart = await loadCart(req.session.cartId);
+  const idempotencyKey = `${cart.id}-c2c-1`;              // persisted with the cart
+
+  const order = await createC2COrder({                     // signs and sends POST /api/merchant/orders
+    orderType: 'Deposit',
+    amount: cart.total,
+    currency: 'PKR',
+    walletType: req.body.walletType ?? 'JazzCash',
+    merchantOrderRef: cart.id,
+    customerReference: req.user.id,
+  }, idempotencyKey);
+
+  await saveC2COrderId(cart.id, order.orderId);           // needed for status checks
+  res.json({ paymentPageUrl: order.paymentPageUrl, statusPage: `/orders/${cart.id}` });
+});
+```
+
+## Security notes
+
+- The page and its backend endpoints are operated by C2C. Your API key and secrets are never involved, and the customer never sees them.
+- The page never asks for the customer's wallet PIN or OTP. Customers pay from their own wallet app.
+- Never build or modify payment page URLs yourself. Always use the `paymentPageUrl` returned by the API.

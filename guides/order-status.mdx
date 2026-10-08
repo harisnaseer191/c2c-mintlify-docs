@@ -1,0 +1,74 @@
+---
+title: "Order Status & Tracking"
+description: "Identifiers, statuses and how to reliably find out the outcome of every order."
+---
+
+## Identifiers
+
+| Identifier | Example | Who sets it | Use it for |
+|------------|---------|-------------|------------|
+| `orderId` | `788fcae0-5214-403c-baa2-f318c0eb1b5b` | C2C | **Status queries** and webhook matching. Always store it. |
+| `orderReference` | `ORD-20261008120620-3f6b` | C2C | Human-readable reference shown to the customer and used with support |
+| `merchantOrderRef` | `INV-10045` | You (optional) | Your own reference, echoed in webhooks. Not unique, not queryable. |
+| `Idempotency-Key` | `INV-10045-attempt-1` | You (required) | Safe retries of order creation |
+
+<Note>
+  [Query order status](/api-reference/endpoints/query-order-status) accepts only the `orderId`, and only for orders created with the same API key. If an order-creation call timed out before you got the `orderId`, retry it with the **same** `Idempotency-Key`. The response contains the original `orderId`.
+</Note>
+
+## Statuses
+
+<Tabs>
+  <Tab title="In progress">
+    | Status | Order type | Waiting for |
+    |--------|-----------|-------------|
+    | `Queued` | Deposit | Customer to open the payment page and choose a wallet |
+    | `AwaitingCustomerPayment` | Deposit | Customer to pay and submit the transaction digits |
+    | `AwaitingMemberConfirmation` | Deposit | Member to verify the payment |
+    | `AwaitingMemberPayout` | Withdrawal | Member to send and confirm the payout |
+    | `ManualReview` | Both | C2C operations to resolve the order |
+  </Tab>
+  <Tab title="Final: success">
+    | Status | Meaning |
+    |--------|---------|
+    | `Completed` | Deposit received and credited / withdrawal paid out and debited |
+    | `Confirmed` | Legacy equivalent of `Completed` (older orders) |
+  </Tab>
+  <Tab title="Final: not completed">
+    | Status | Meaning |
+    |--------|---------|
+    | `Rejected` | Member rejected the order |
+    | `Expired` | Deposit payment page expired before the customer paid |
+    | `CancelledTimeout` | Deposit had no checkout activity before the queue timeout |
+    | `Cancelled` | Cancelled by C2C or the member |
+    | `CancelledAuto` | Cancelled automatically by the system |
+  </Tab>
+</Tabs>
+
+Legacy orders can also show `Assigned` or `Frozen`. Treat both as in progress.
+
+## Getting the outcome reliably
+
+Use both mechanisms:
+
+1. **Webhooks** for fast notification of `Completed`, `Rejected` and escalation to `ManualReview`. See [Webhooks](/guides/webhooks).
+2. **Status queries** as the source of truth: confirm a webhook before moving money, and catch outcomes that don't send a webhook (`Expired`, `CancelledTimeout`, `Cancelled`, resolution of `ManualReview`).
+
+### Recommended polling schedule
+
+| Phase | Interval |
+|-------|----------|
+| Customer is on the payment page (first ~15 minutes of a deposit) | every 5–10 s |
+| Waiting for member confirmation or payout | every 30–60 s |
+| `ManualReview` | every 10–15 min |
+| Final status reached | stop |
+
+Each API key can make [100 requests per minute](/api-reference/rate-limits) across all merchant endpoints. Size your polling accordingly.
+
+## Handling each outcome
+
+| Outcome | Deposit | Withdrawal |
+|---------|---------|------------|
+| `Completed` / `Confirmed` | Fulfil the purchase | Mark the payout as paid |
+| `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto` | Don't fulfil. The customer can start a new checkout (new order, new `Idempotency-Key`). | Payout not made. Create a new withdrawal if appropriate. |
+| `ManualReview` | Hold. The customer may already have paid. | Hold. Don't re-pay. |

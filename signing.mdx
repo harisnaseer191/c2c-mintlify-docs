@@ -188,6 +188,25 @@ Requests with a `X-C2C-Timestamp` more than **5 minutes** (300 seconds) away fro
 server's clock are rejected as expired, even with a valid signature. This limits replay
 attacks. Ensure your server's clock is synchronized (NTP).
 
+## Replay protection
+
+A signature on a **state-changing request** (any method other than `GET` or `HEAD`, e.g.
+`POST /api/merchant/orders`) is accepted **only once**. Sending the exact same signed
+request again — same API key, timestamp, method, path and body — is rejected with
+`401 SIGNATURE_REPLAYED`, even while the timestamp is still within the 5-minute tolerance.
+
+<Warning>
+  **Re-sign every retry.** When you retry a `POST` (for example after a network timeout),
+  build a fresh `X-C2C-Timestamp` and `X-C2C-Signature` for each attempt. Keep the same
+  `Idempotency-Key` and the same body — the new timestamp alone makes the signature unique,
+  and the idempotency key still guarantees you get the original order back instead of a
+  duplicate. See [Idempotency](/idempotency).
+</Warning>
+
+`GET` requests (order status, balance) are not subject to replay protection, so polling
+with a reused signature inside the tolerance window is allowed — but signing each poll
+freshly is still recommended.
+
 ## Troubleshooting a rejected request
 
 If a request is rejected for signature reasons, the `401` response body includes a
@@ -208,6 +227,7 @@ request can be found in our logs:
 | `SIGNATURE_REQUIRED` | `X-C2C-Timestamp` or `X-C2C-Signature` header is missing or malformed | Ensure both headers are present on every request |
 | `SIGNATURE_EXPIRED` | The timestamp is outside the 5-minute tolerance | Sync your server clock and sign requests immediately before sending |
 | `SIGNATURE_INVALID` | The API key is unknown/revoked, or the signature does not match | Verify you are using the current signing secret and the canonical string (method, path, and raw body) exactly matches what was sent |
+| `SIGNATURE_REPLAYED` | An identical signed `POST` was already accepted (same timestamp, method, path and body) | Re-sign the retry with a fresh timestamp — see [Replay protection](#replay-protection) |
 
 <Note>
   During rollout, some environments may run signature checks in **log-only mode**

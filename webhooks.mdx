@@ -30,8 +30,9 @@ Set `callbackUrl` in your `POST /api/merchant/orders` request and your endpoint 
 ```
 
 <Warning>
-  Your callback URL must be an HTTPS endpoint reachable from the internet.
-  The platform does not retry to unreachable hosts indefinitely — ensure your server is available.
+  `callbackUrl` must be an absolute `http://` or `https://` URL (max 500 characters) reachable
+  from the internet — any other scheme is rejected with `400`. Use **HTTPS** in production.
+  The platform does not retry unreachable hosts indefinitely — ensure your server is available.
 </Warning>
 
 ## Event types
@@ -75,17 +76,54 @@ Set `callbackUrl` in your `POST /api/merchant/orders` request and your endpoint 
 }
 ```
 
+### Payload fields
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `eventType` | string | `order.completed` or `order.failed` (same value as the `X-C2C-Event` header) |
+| `orderId` | string (UUID) | The `orderId` returned when you created the order |
+| `orderReference` | string | Platform-generated order reference |
+| `merchantOrderRef` | string \| null | Your own reference, if you sent one |
+| `amount` | number | Order amount |
+| `currency` | string | ISO currency code, e.g. `"PKR"` |
+| `status` | string | Order status at the time of the event, e.g. `Completed`, `Rejected`, `Expired` |
+| `completedAt` | string (UTC) | `order.completed` only — when the order was confirmed |
+| `reason` | string | `order.failed` only — why the order failed |
+| `timestamp` | string (UTC) | When the event was generated. Stays the same on every retry of the same event |
+
 ## Verifying the signature
 
-Every webhook request includes two headers:
+Every webhook request includes these headers:
 
 | Header | Value |
 |--------|-------|
 | `X-C2C-Signature` | `sha256=<hmac-sha256-hex>` |
 | `X-C2C-Event` | `order.completed` or `order.failed` |
+| `X-C2C-Key-Prefix` | The key prefix of the API key whose secret signed this webhook — the 8 characters right after `mk_live_` (e.g. `a1b2c3d4` for `mk_live_a1b2c3d4...`) |
 
-The signature is an HMAC-SHA256 of the raw request body, keyed with your **webhook signing secret**.
-Contact your C2C admin to obtain your signing secret.
+The signature is an HMAC-SHA256 of the **raw request body**, keyed with your **API key's
+signing secret** (`sksec_...`) — the same secret you use to [sign API requests](/signing).
+No separate webhook secret is needed.
+
+Which key signs a webhook:
+
+- The API key that **created the order**, while that key is still active
+- If that key has since been revoked or rotated, your merchant account's **newest active key**
+
+`X-C2C-Key-Prefix` tells you which key was used, so during a key rotation you can look up
+the matching secret instead of trying each one.
+
+<Note>
+  Every attempt is re-signed with the current secret, so a retry of a webhook first sent before
+  a key rotation is signed with your **new** key's secret. Keep the new secret deployed before
+  revoking the old key.
+</Note>
+
+<Note>
+  Legacy API keys issued without a signing secret receive webhooks signed with a platform-wide
+  secret and without the `X-C2C-Key-Prefix` header. Ask your C2C admin to regenerate the key to
+  move to per-merchant signing.
+</Note>
 
 **Verification examples**
 
@@ -109,7 +147,7 @@ function verifyWebhook(rawBody, signatureHeader, signingSecret) {
 // Express example
 app.post('/webhooks/c2c', express.raw({ type: 'application/json' }), (req, res) => {
   const signature = req.headers['x-c2c-signature'];
-  if (!verifyWebhook(req.body, signature, process.env.C2C_WEBHOOK_SECRET)) {
+  if (!verifyWebhook(req.body, signature, process.env.C2C_SIGNING_SECRET)) {
     return res.status(401).send('Invalid signature');
   }
 
@@ -141,7 +179,7 @@ app = Flask(__name__)
 def webhook():
     raw_body = request.get_data()
     signature = request.headers.get('X-C2C-Signature', '')
-    if not verify_webhook(raw_body, signature, os.environ['C2C_WEBHOOK_SECRET']):
+    if not verify_webhook(raw_body, signature, os.environ['C2C_SIGNING_SECRET']):
         abort(401)
 
     event = json.loads(raw_body)
@@ -160,7 +198,7 @@ function verifyWebhook(string $rawBody, string $signatureHeader, string $signing
 $rawBody = file_get_contents('php://input');
 $signature = $_SERVER['HTTP_X_C2C_SIGNATURE'] ?? '';
 
-if (!verifyWebhook($rawBody, $signature, getenv('C2C_WEBHOOK_SECRET'))) {
+if (!verifyWebhook($rawBody, $signature, getenv('C2C_SIGNING_SECRET'))) {
     http_response_code(401);
     exit;
 }
@@ -183,26 +221,32 @@ http_response_code(200);
 
 ## Retry behaviour
 
-If your endpoint returns a non-`2xx` status code or is unreachable, the platform retries
-up to **10 times** using exponential backoff:
+If your endpoint returns a non-`2xx` status code or is unreachable, the platform retries the
+**same delivery** using exponential backoff. A delivery is attempted at most **10 times** in total
+(the first attempt plus up to 9 retries):
 
-| Attempt | Delay after failure |
-|---------|---------------------|
-| 1 | 30 s |
-| 2 | 60 s |
-| 3 | 120 s |
-| 4 | 240 s |
-| 5 | 480 s |
-| … | doubles each time |
-| 10 | ~4 h |
+| After failed attempt | Next attempt in |
+|----------------------|-----------------|
+| 1 | 60 s |
+| 2 | 2 min |
+| 3 | 4 min |
+| 4 | 8 min |
+| 5 | 16 min |
+| 6 | 32 min |
+| 7 | ~64 min |
+| 8 | ~2 h 8 min |
+| 9 | ~4 h 16 min |
+| 10 | — abandoned |
 
-After 10 failed attempts, the delivery is abandoned. Use polling as a fallback for
-orders where you did not receive a webhook.
+Each retry sends the **identical JSON body** (including the original `timestamp`), re-signed with
+the current signing secret. Retries are checked periodically, so an attempt may arrive shortly
+after the time shown. After the 10th failed attempt the delivery is abandoned — use
+[polling](#polling-as-a-fallback) to reconcile any order you did not receive a webhook for.
 
 ## Best practices
 
 - **Respond immediately** — return `200` as soon as you validate the signature, then process asynchronously
-- **Make your handler idempotent** — the same event may be delivered more than once due to retries
+- **Make your handler idempotent** — the same event may be delivered more than once due to retries; deduplicate on `orderId` + `eventType`
 - **Use `merchantOrderRef`** — set a unique reference per order so your handler can locate the record quickly
 - **Check `status`** — never fulfil on `order.failed`, even if `eventType` is unexpected
 

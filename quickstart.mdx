@@ -126,6 +126,13 @@ On the payment page, the customer:
 3. Optionally uploads a receipt image
 4. Submits — the assigned member is then notified to verify
 
+<Tip>
+  Set `successUrl` and `failureUrl` when creating the order and the payment page sends the customer
+  back to your site once the order is final, with `c2c_order_id`, `c2c_order_reference` and
+  `c2c_status` appended. See [Returning the customer](/guides/server-integration#returning-the-customer-to-your-site).
+  Always confirm the result server-side before fulfilling — the redirect is not proof of payment.
+</Tip>
+
 ## Step 4: Poll for confirmation
 
 After the customer submits, the assigned member verifies the payment and approves or rejects it.
@@ -165,6 +172,8 @@ For withdrawal orders (where a member sends money **to** your customer), pass `o
 curl -X POST https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
   -H "Authorization: Bearer mk_live_your_api_key" \
   -H "Idempotency-Key: withdraw_$(uuidgen)" \
+  -H "X-C2C-Timestamp: $TIMESTAMP" \
+  -H "X-C2C-Signature: $SIGNATURE" \
   -H "Content-Type: application/json" \
   -d '{
     "orderType": "Withdrawal",
@@ -178,6 +187,12 @@ curl -X POST https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps
 ```
 
 The assigned member sees the customer's account number on their app, sends the money, confirms with the last 4 digits of their outbound transaction, and the order moves to `Confirmed`.
+
+<Note>
+  Your available balance must cover the withdrawal **plus all withdrawals still in progress**, including
+  fees — otherwise the request is rejected with `422` and no order is created. See
+  [Withdrawal funding](/guides/server-integration#withdrawal-funding).
+</Note>
 
 ## Next steps
 

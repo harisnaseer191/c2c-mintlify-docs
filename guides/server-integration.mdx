@@ -197,20 +197,79 @@ In addition to the required fields, you can set the following when creating an o
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `callbackUrl` | string (HTTPS URL) | — | Webhook endpoint to notify on completion or failure |
-| `successUrl` | string (HTTPS URL) | — | Redirect destination on the payment page after successful payment |
-| `failureUrl` | string (HTTPS URL) | — | Redirect destination on the payment page after failure |
+| `callbackUrl` | string (http/https URL) | — | Webhook endpoint to notify on completion or failure — see [Webhooks](/webhooks) |
+| `successUrl` | string (http/https URL) | — | Where the payment page sends the customer after a successful payment — see [Returning the customer](#returning-the-customer-to-your-site) |
+| `failureUrl` | string (http/https URL) | — | Where the payment page sends the customer after the order is rejected, cancelled or expires |
 | `metadata` | string | — | Arbitrary string (e.g. JSON) stored with the order for your own use |
 | `txnRefDigitsRequired` | integer (4–8) | 4 | How many trailing digits of the wallet transaction ID the customer must enter |
 | `maxRetryCount` | integer (0–10) | 3 | Maximum retries before the order escalates to `ManualReview` |
 
+All three URLs must be absolute `http://` or `https://` URLs of at most 500 characters; any other
+scheme (such as `javascript:` or `data:`) is rejected with `400`. Use HTTPS in production.
+
+## Returning the customer to your site
+
+When you set `successUrl` and/or `failureUrl`, the payment page sends the customer back to you
+once the order reaches a final state:
+
+| Final status | Destination |
+|--------------|-------------|
+| `Completed` / `Confirmed` | `successUrl` |
+| `Rejected` / `Cancelled` / `CancelledAuto` / `CancelledTimeout` / `Expired` | `failureUrl` |
+
+The page shows the result, then redirects after **5 seconds** (the customer can also click
+**Return now**). These query parameters are appended to your URL (existing parameters are kept):
+
+| Parameter | Value |
+|-----------|-------|
+| `c2c_order_id` | The `orderId` |
+| `c2c_order_reference` | The platform `orderReference` |
+| `c2c_status` | The final order status, e.g. `Completed` or `Expired` |
+
+```text
+https://yoursite.com/payment/success?c2c_order_id=a1b2c3d4-e5f6-7890-abcd-ef1234567890&c2c_order_reference=C2C-20260618-001234&c2c_status=Completed
+```
+
+<Warning>
+  Treat the redirect as a **navigation hint only** — the query parameters are not signed and a
+  customer can edit them. Never fulfil an order from the redirect. Confirm the outcome from a
+  verified [webhook](/webhooks) or by calling `GET /api/merchant/orders/{id}/status` from your server.
+</Warning>
+
+If you omit a URL, the payment page simply shows the final result and the customer stays on it.
+While a deposit is awaiting member confirmation, the page asks the customer to keep it open when a
+`successUrl` is set, so they can be returned to you automatically.
+
+## Withdrawal funding
+
+A confirmed withdrawal debits **amount + fee** from your merchant balance. To make sure every
+payout can be funded, the platform checks your **available balance** when you create a withdrawal:
+it must cover the new withdrawal **plus all of your withdrawals still in progress**
+(`Assigned`, `Frozen`, `AwaitingMemberPayout`, `ManualReview`), each counted as amount + fee.
+If it does not, the order is not created and the API returns `422`:
+
+```json
+{
+  "error": "Insufficient merchant balance: 1200.00 PKR available, 2060.00 PKR required for this withdrawal and withdrawals in progress (including fees)."
+}
+```
+
+Top up your balance or wait for in-flight withdrawals to complete, then retry with a new
+`Idempotency-Key`. Check your balance any time with `GET /api/merchant/orders/balance`.
+
 ## Error handling
 
 Always handle errors from every API call. The most important non-obvious error is `422 NO_ELIGIBLE_MEMBER`—
-this means no member is currently available for the requested wallet type, and your code should retry after a delay:
+this means no member is currently available for the requested wallet type, and your code should retry after a delay.
+
+Keep the same `Idempotency-Key` on every retry, but **re-sign each attempt** with a fresh timestamp —
+a `POST` re-sent with its original signature is rejected as `401 SIGNATURE_REPLAYED`
+(see [Replay protection](/signing#replay-protection)):
 
 ```javascript
 async function createOrderWithRetry(params, retries = 3) {
+  const body = JSON.stringify(params);
+
   for (let attempt = 0; attempt < retries; attempt++) {
     const response = await fetch('https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders', {
       method: 'POST',
@@ -218,12 +277,14 @@ async function createOrderWithRetry(params, retries = 3) {
         'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
         'Idempotency-Key': params.idempotencyKey, // same key on every retry attempt
         'Content-Type': 'application/json',
+        // fresh X-C2C-Timestamp / X-C2C-Signature per attempt — see /signing
+        ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', '/api/merchant/orders', body),
       },
-      body: JSON.stringify(params),
+      body,
     });
 
-    // 409 = idempotency match, safe to use the existing order
-    if (response.status === 409 || response.ok) return response.json();
+    // 200 = new order, or the order this idempotency key already created
+    if (response.ok) return response.json();
 
     const error = await response.json();
 

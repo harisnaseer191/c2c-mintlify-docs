@@ -41,7 +41,7 @@
         "in": "header",
         "required": true,
         "schema": { "type": "string", "example": "sha256=9439f71c99f229e9edfbfbb5464ffe1fb9b506061b6de9c55d52c88dcd4c18f6" },
-        "description": "`sha256=<hex>` — HMAC-SHA256 of the canonical request string (`timestamp\nMETHOD\npath\nhex(sha256(body))`), keyed with your signing secret. See the [Request Signing](/signing) guide."
+        "description": "`sha256=<hex>` — HMAC-SHA256 of the canonical request string (`timestamp\nMETHOD\npath\nhex(sha256(body))`), keyed with your signing secret. On `POST` requests each signature is accepted only once — re-sign every retry with a fresh timestamp or it is rejected as `SIGNATURE_REPLAYED`. See the [Request Signing](/signing) guide."
       }
     },
     "schemas": {
@@ -99,7 +99,7 @@
             "format": "uri",
             "nullable": true,
             "maxLength": 500,
-            "description": "HTTPS URL that receives a signed webhook POST when the order completes or fails. See the [Webhooks guide](/webhooks) for payload shapes and signature verification.",
+            "description": "Absolute `http://` or `https://` URL (HTTPS recommended) that receives a webhook POST when the order completes or fails. Webhooks are signed with your API key's signing secret. Any other scheme is rejected with `400`. See the [Webhooks guide](/webhooks) for payload shapes and signature verification.",
             "example": "https://yoursite.com/webhooks/c2c"
           },
           "successUrl": {
@@ -107,7 +107,7 @@
             "format": "uri",
             "nullable": true,
             "maxLength": 500,
-            "description": "URL the payment page redirects the customer to after a successful payment. If omitted, the payment page shows a generic success screen.",
+            "description": "Absolute `http://` or `https://` URL the payment page sends the customer to, 5 seconds after the order is `Completed`/`Confirmed`, with `c2c_order_id`, `c2c_order_reference` and `c2c_status` query parameters appended. Any other scheme is rejected with `400`. The redirect is not proof of payment — confirm via webhook or the status endpoint before fulfilling. If omitted, the payment page shows a generic success screen.",
             "example": "https://yoursite.com/payment/success"
           },
           "failureUrl": {
@@ -115,7 +115,7 @@
             "format": "uri",
             "nullable": true,
             "maxLength": 500,
-            "description": "URL the payment page redirects the customer to if the payment is rejected or expires. If omitted, the payment page shows a generic failure screen.",
+            "description": "Absolute `http://` or `https://` URL the payment page sends the customer to, 5 seconds after the order is rejected, cancelled or expires, with `c2c_order_id`, `c2c_order_reference` and `c2c_status` query parameters appended. Any other scheme is rejected with `400`. If omitted, the payment page shows a generic failure screen.",
             "example": "https://yoursite.com/payment/failed"
           },
           "metadata": {
@@ -290,7 +290,7 @@
       "post": {
         "tags": ["Orders"],
         "summary": "Create an order",
-        "description": "Creates a new payment order. The platform automatically selects an eligible online member whose account matches the requested `walletType`. Returns a signed payment page URL to redirect your customer to — the page displays the assigned member's account number and collects the customer's last-4-digit transaction reference.\n\n**Deposit orders**: The customer sends money to the displayed account, then submits the last 4 digits of their transaction ID (and optionally a receipt image) on the payment page. The assigned member then verifies and approves or rejects the order.\n\n**Withdrawal orders**: The assigned member sends money to `customerAccountNumber`, then confirms with the last 4 digits of their outbound transaction.\n\n**Important**: You must include the `Idempotency-Key` header to prevent duplicate orders, and sign every request — see [Request Signing](/signing). The `walletType` field is required.",
+        "description": "Creates a new payment order. The platform automatically selects an eligible online member whose account matches the requested `walletType`. Returns a signed payment page URL to redirect your customer to — the page displays the assigned member's account number and collects the customer's last-4-digit transaction reference.\n\n**Deposit orders**: The customer sends money to the displayed account, then submits the last 4 digits of their transaction ID (and optionally a receipt image) on the payment page. The assigned member then verifies and approves or rejects the order.\n\n**Withdrawal orders**: The assigned member sends money to `customerAccountNumber`, then confirms with the last 4 digits of their outbound transaction.\n\n**Withdrawal funding**: your available balance must cover the new withdrawal plus all withdrawals still in progress (amount + fee each), otherwise the request is rejected with `422` and no order is created.\n\n**Important**: You must include the `Idempotency-Key` header to prevent duplicate orders, and sign every request — see [Request Signing](/signing). Re-sign each retry with a fresh timestamp (keep the same `Idempotency-Key`). The `walletType` field is required.",
         "operationId": "createOrder",
         "parameters": [
           {
@@ -301,7 +301,7 @@
               "type": "string",
               "example": "order_game_abc123xyz"
             },
-            "description": "A unique key for this request. If you retry with the same key, the original order is returned without creating a duplicate."
+            "description": "A unique key for this order, scoped to your API key. If you retry with the same key — including concurrent retries — the original order is returned with its current status and no duplicate is created. Keys do not expire; use a new key for every new order. See [Idempotency](/idempotency)."
           },
           { "$ref": "#/components/parameters/SignatureTimestampHeader" },
           { "$ref": "#/components/parameters/SignatureSignatureHeader" }
@@ -345,7 +345,7 @@
         },
         "responses": {
           "200": {
-            "description": "Order created successfully",
+            "description": "Order created — or, for an `Idempotency-Key` already used by this API key, the original order with its current status",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/CreateOrderResponse" }
@@ -353,15 +353,25 @@
             }
           },
           "400": {
-            "description": "Invalid request or missing Idempotency-Key",
+            "description": "Invalid request (e.g. a `callbackUrl`/`successUrl`/`failureUrl` that is not an absolute http(s) URL) or missing Idempotency-Key",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "examples": {
+                  "missingIdempotencyKey": {
+                    "summary": "Missing Idempotency-Key header",
+                    "value": { "error": "Idempotency-Key header is required." }
+                  },
+                  "invalidUrl": {
+                    "summary": "Redirect or callback URL is not http(s)",
+                    "value": { "error": "SuccessUrl must be a valid absolute http(s) URL." }
+                  }
+                }
               }
             }
           },
           "401": {
-            "description": "Missing/invalid API key (`UNAUTHORIZED`), or missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`) — see [Request Signing](/signing)",
+            "description": "Missing/invalid API key (`UNAUTHORIZED`), missing/expired/invalid request signature (`SIGNATURE_REQUIRED`, `SIGNATURE_EXPIRED`, `SIGNATURE_INVALID`), or a signature that was already used (`SIGNATURE_REPLAYED`) — see [Request Signing](/signing)",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorResponse" },
@@ -373,31 +383,35 @@
                   "invalidSignature": {
                     "summary": "Missing, expired, or invalid request signature",
                     "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_INVALID" }
+                  },
+                  "replayedSignature": {
+                    "summary": "Same signed request sent twice — re-sign retries with a fresh timestamp",
+                    "value": { "success": false, "error": "Request signature is missing, expired, or invalid.", "code": "SIGNATURE_REPLAYED" }
                   }
                 }
               }
             }
           },
           "422": {
-            "description": "No eligible member available for this wallet type and amount",
+            "description": "No eligible member available for this wallet type and amount, or (withdrawals only) insufficient merchant balance to cover this withdrawal plus withdrawals in progress, including fees",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "example": {
-                  "success": false,
-                  "error": "No eligible member is currently available for this order.",
-                  "code": "NO_ELIGIBLE_MEMBER"
+                "examples": {
+                  "noEligibleMember": {
+                    "summary": "No eligible member available",
+                    "value": { "success": false, "error": "No eligible member is currently available for this order.", "code": "NO_ELIGIBLE_MEMBER" }
+                  },
+                  "insufficientBalance": {
+                    "summary": "Withdrawal: insufficient merchant balance",
+                    "value": { "error": "Insufficient merchant balance: 1200.00 PKR available, 2060.00 PKR required for this withdrawal and withdrawals in progress (including fees)." }
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Rate limit exceeded (100 requests/minute)",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
-              }
-            }
+            "description": "Rate limit exceeded — 100 requests/minute per API key. Empty response body; wait for the 60-second window to reset. See [Rate Limits](/rate-limits)."
           }
         }
       }

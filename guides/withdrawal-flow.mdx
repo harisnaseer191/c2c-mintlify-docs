@@ -44,7 +44,7 @@ Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 - `walletType`: the customer's receiving wallet or account type
 - `customerAccountNumber`: where to send the money
 - `amount`, optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
-- a unique `Idempotency-Key` and a valid signature. Withdrawals are always signature-enforced, and the signature protects the account number and amount from tampering.
+- a unique `Idempotency-Key` and a valid `signature` field. Withdrawals are always signature-enforced, and the signature covers the account number and amount, so they can't be changed in transit.
 
 C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, channel enabled, and a `merchantOrderRef` that isn't already used by a payout in progress or completed (`409`). It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees. The fee is fixed when the order is accepted; later fee-rule changes apply to new orders only.
 
@@ -92,10 +92,9 @@ stateDiagram-v2
 
 <CodeGroup>
 ```javascript Node.js
-// signRequest(): see the Signature Generation Guide
+// signBody(): see the Signature Generation Guide
 async function payOut(payout) {
-  const path = '/api/merchant/orders';
-  const body = JSON.stringify({
+  const payload = {
     orderType: 'Withdrawal',
     amount: payout.amount,
     currency: 'PKR',
@@ -103,17 +102,16 @@ async function payOut(payout) {
     customerAccountNumber: payout.accountNumber,   // validated on your side
     merchantOrderRef: payout.id,
     customerReference: payout.customerId,
-  });
+  };
 
-  const res = await fetch(BASE_URL + path, {
+  const res = await fetch(`${BASE_URL}/api/merchant/orders`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'C2C-API-Key': process.env.C2C_API_KEY,
       'Content-Type': 'application/json',
       'Idempotency-Key': `payout-${payout.id}`,     // one key per payout, reused on every retry
-      ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
     },
-    body,
+    body: JSON.stringify({ ...payload, signature: signBody(payload, process.env.C2C_SIGNING_SECRET) }),
   });
   if (!res.ok) throw new Error(`Create withdrawal failed: HTTP ${res.status} ${await res.text()}`);
   const { data } = await res.json();
@@ -122,12 +120,11 @@ async function payOut(payout) {
 ```
 
 ```python Python
-import json, os, requests
+import os, requests
 
-# sign_request(): see the Signature Generation Guide
+# sign_body(): see the Signature Generation Guide
 def pay_out(payout) -> None:
-    path = "/api/merchant/orders"
-    body = json.dumps({
+    payload = {
         "orderType": "Withdrawal",
         "amount": payout.amount,
         "currency": "PKR",
@@ -135,13 +132,15 @@ def pay_out(payout) -> None:
         "customerAccountNumber": payout.account_number,
         "merchantOrderRef": payout.id,
         "customerReference": payout.customer_id,
-    }, separators=(",", ":"))
-    res = requests.post(BASE_URL + path, data=body.encode("utf-8"), headers={
-        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-        "Content-Type": "application/json",
-        "Idempotency-Key": f"payout-{payout.id}",
-        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
-    })
+    }
+    res = requests.post(
+        f"{BASE_URL}/api/merchant/orders",
+        json={**payload, "signature": sign_body(payload, os.environ["C2C_SIGNING_SECRET"])},
+        headers={
+            "C2C-API-Key": os.environ["C2C_API_KEY"],
+            "Idempotency-Key": f"payout-{payout.id}",
+        },
+    )
     res.raise_for_status()
     db.mark_payout_processing(payout.id, res.json()["data"]["orderId"])
 ```

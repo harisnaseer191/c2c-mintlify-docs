@@ -1,6 +1,6 @@
 ---
 title: "Authentication Process"
-description: "Authenticate every request with your merchant API key, and sign it with the key's signing secret."
+description: "Authenticate every request with your merchant API key, and sign deposit and withdrawal orders with the key's signing secret."
 ---
 
 ## Overview
@@ -9,8 +9,8 @@ The C2C Merchant API uses two credentials, issued together:
 
 | Credential | Format | Used for |
 |------------|--------|----------|
-| **API key** | `mk_live_` + 32 alphanumeric characters | Identifies your merchant account. Sent as a Bearer token. |
-| **Signing secret** | `sksec_` + 40 alphanumeric characters | Signs each request and verifies the [webhooks](/guides/webhooks) C2C sends you. Never sent over the wire. See the [Signature Generation Guide](/api-reference/signature-guide). |
+| **API key** | `mk_live_` + 32 alphanumeric characters | Identifies your merchant account. Sent in the `C2C-API-Key` header on every request. |
+| **Signing secret** | `sksec_` + 40 alphanumeric characters | Signs deposit and withdrawal orders and verifies the [webhooks](/guides/webhooks) C2C sends you. Never sent over the wire. See the [Signature Generation Guide](/api-reference/signature-guide). |
 
 <Warning>
   Both credentials are shown **only once**, when C2C issues them. C2C stores only a hash of your API key and cannot show it to you again. Store both immediately in a secret manager or environment variables, and never expose them in client-side code.
@@ -23,7 +23,7 @@ A C2C administrator issues API keys for your merchant account, and each key come
 - You can hold **more than one active API key** (for example one per backend service). Each key has its own signing secret.
 - **Idempotency keys** are scoped to the API key that used them. **Orders** belong to your merchant account: any of your active keys can query their status, including orders created before a key rotation.
 - **Regenerating** your API key issues a new key and secret and **revokes every previously active key** on your account.
-- A revoked key stops working within about **2 minutes**.
+- A revoked key stops working immediately.
 
 <Note>
   What you can do in the Merchant Portal depends on your portal role. The account owner has full access. Team members only see the pages their role allows: **API Keys** to view or revoke keys, **Settings** to change the default callback URL, and **Transactions** for order history. The account owner manages roles in the portal.
@@ -31,46 +31,39 @@ A C2C administrator issues API keys for your merchant account, and each key come
 
 ## Authentication method
 
-Send your API key in the `Authorization` header using the Bearer scheme:
+Send your API key in the `C2C-API-Key` header:
 
 ```http
-Authorization: Bearer mk_live_your_api_key
+C2C-API-Key: mk_live_your_api_key
 ```
+
+<Note>
+  `Authorization: Bearer mk_live_...` is still accepted for existing integrations. If a request carries both, `C2C-API-Key` is used.
+</Note>
 
 ### Required headers
 
 | Header | Required on | Value |
 |--------|-------------|-------|
-| `Authorization` | All requests | `Bearer mk_live_...` |
-| `X-C2C-Timestamp` | All requests | Unix seconds at signing time |
-| `X-C2C-Signature` | All requests | `sha256=<hex>`, see the [Signature Generation Guide](/api-reference/signature-guide) |
+| `C2C-API-Key` | All requests | `mk_live_...` |
 | `Content-Type` | Requests with a body | `application/json` |
 | `Idempotency-Key` | `POST /api/merchant/orders` | Your unique key for this order attempt, up to 100 characters. See [Idempotency](/api-reference/idempotency). |
+
+Deposit and withdrawal requests also carry a `signature` field **in the JSON body**. See the [Signature Generation Guide](/api-reference/signature-guide). Status and balance requests need only the API key.
 
 ### Example request
 
 <CodeGroup>
 ```bash cURL
-# TIMESTAMP and SIGNATURE computed as described in the Signature Generation Guide
-# (GET request → body hash of the empty string)
 curl --request GET \
   --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance \
-  --header "Authorization: Bearer $C2C_API_KEY" \
-  --header "X-C2C-Timestamp: $TIMESTAMP" \
-  --header "X-C2C-Signature: $SIGNATURE"
+  --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
 ```javascript Node.js
-// signRequest() is defined in the Signature Generation Guide
-const path = '/api/merchant/orders/balance';
 const response = await fetch(
-  `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
-  {
-    headers: {
-      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
-      ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
-    },
-  }
+  'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance',
+  { headers: { 'C2C-API-Key': process.env.C2C_API_KEY } }
 );
 console.log(response.status, await response.json());
 ```
@@ -79,35 +72,11 @@ console.log(response.status, await response.json());
 import os
 import requests
 
-# sign_request() is defined in the Signature Generation Guide
-path = "/api/merchant/orders/balance"
 response = requests.get(
-    f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
-    headers={
-        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-        **sign_request(os.environ["C2C_SIGNING_SECRET"], "GET", path, ""),
-    },
+    "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance",
+    headers={"C2C-API-Key": os.environ["C2C_API_KEY"]},
 )
 print(response.status_code, response.json())
-```
-
-```php PHP
-<?php
-// signRequest() is defined in the Signature Generation Guide
-$path = '/api/merchant/orders/balance';
-$signed = signRequest(getenv('C2C_SIGNING_SECRET'), 'GET', $path, '');
-
-$ch = curl_init('https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io' . $path);
-curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_HTTPHEADER => [
-        'Authorization: Bearer ' . getenv('C2C_API_KEY'),
-        'X-C2C-Timestamp: ' . $signed['X-C2C-Timestamp'],
-        'X-C2C-Signature: ' . $signed['X-C2C-Signature'],
-    ],
-]);
-echo curl_exec($ch);
-curl_close($ch);
 ```
 </CodeGroup>
 
@@ -124,7 +93,7 @@ A successful call returns `200`:
 ```
 
 <Tip>
-  `GET /api/merchant/orders/balance` has no side effects, so it is a good way to test your credentials and signing code.
+  `GET /api/merchant/orders/balance` has no side effects, so it is a good way to test your API key. Test your signing code against the [worked examples](/api-reference/signature-guide#worked-examples).
 </Tip>
 
 ## Storing credentials securely
@@ -155,7 +124,7 @@ C2C_SIGNING_SECRET=sksec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     Azure Key Vault, AWS Secrets Manager or HashiCorp Vault, not plain configuration files.
   </Step>
   <Step title="Never log credentials">
-    Mask the `Authorization` header and never log the signing secret.
+    Mask the `C2C-API-Key` (or `Authorization`) header and never log the signing secret.
   </Step>
   <Step title="Separate keys per environment">
     Use different keys for development and production. Keys only work in the environment that issued them.
@@ -167,7 +136,7 @@ C2C_SIGNING_SECRET=sksec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ## Account-level access controls
 
-Besides the API key and signature, C2C applies these checks when you create an order:
+Besides the API key and signature, C2C applies these checks when you create an order. The Merchant API has no request rate limits.
 
 | Check | Result when it fails |
 |-------|----------------------|
@@ -179,7 +148,7 @@ Besides the API key and signature, C2C applies these checks when you create an o
 
 ### 401 Unauthorized: API key
 
-Returned when the `Authorization` header is missing, isn't a Bearer `mk_` key, or the key is unknown or revoked. The response has an **empty body**.
+Returned when no API key is sent (neither `C2C-API-Key` nor `Authorization: Bearer mk_...`), the `C2C-API-Key` value isn't an `mk_` key, or the key is unknown or revoked. The response has an **empty body**.
 
 ```http
 HTTP/1.1 401 Unauthorized
@@ -188,18 +157,18 @@ Content-Length: 0
 
 **Checklist**
 
-1. The header is exactly `Authorization: Bearer mk_live_...`, with no quotes or extra spaces.
+1. The header is exactly `C2C-API-Key: mk_live_...`, with no quotes or extra spaces.
 2. The key belongs to the environment you are calling.
 3. The key has not been revoked or replaced by a regeneration.
 
 ### 401 Unauthorized: signature
 
-Returned when the API key is valid but the request signature is missing, malformed, expired or wrong. Unlike an API key failure, this response has a JSON body with a `code`:
+Returned on order creation when the API key is valid but the body's `signature` is missing, malformed, wrong or replayed. Unlike an API key failure, this response has a JSON body with a `code`:
 
 ```json
 {
   "success": false,
-  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "error": "The request body must include a 'signature' field.",
   "code": "SIGNATURE_REQUIRED",
   "traceId": "15f1bf9c3472631576b915f2382451fd"
 }

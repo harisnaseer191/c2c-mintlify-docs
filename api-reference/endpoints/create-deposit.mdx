@@ -15,7 +15,7 @@ The order is **always accepted**. If no eligible member is available right now, 
 | | |
 |---|---|
 | **API key** | Required |
-| **Signature** | **Required, always enforced.** See the [Signature Generation Guide](/api-reference/signature-guide) |
+| **Signature** | **Required**, in the body's `signature` field. See the [Signature Generation Guide](/api-reference/signature-guide) |
 | **Idempotency-Key** | Required |
 
 <Info>
@@ -24,18 +24,8 @@ The order is **always accepted**. If no eligible member is available right now, 
 
 ## Headers
 
-<ParamField header="Authorization" type="string" required>
-  `Bearer mk_live_...`, your merchant API key.
-</ParamField>
-
-<ParamField header="X-C2C-Timestamp" type="string" required>
-  Unix time in seconds when the request was signed. Must be within 300 seconds of C2C's clock.
-</ParamField>
-
-<ParamField header="X-C2C-Signature" type="string" required>
-  `sha256=` + lowercase hex HMAC-SHA256 of `{timestamp}\n{METHOD}\n{path}\n{hex(sha256(body))}`, keyed with your signing secret.
-
-  **Example:** `sha256=c1c7c3f90a1b862cd8d9b8c173e59677d7acff2735a7bd9580ed69e18983558c`
+<ParamField header="C2C-API-Key" type="string" required>
+  `mk_live_...`, your merchant API key. `Authorization: Bearer mk_live_...` is also accepted.
 </ParamField>
 
 <ParamField header="Idempotency-Key" type="string" required>
@@ -106,6 +96,12 @@ The order is **always accepted**. If no eligible member is available right now, 
   `0` to `10`. Only used by withdrawals: it limits how often C2C reassigns an order to another member. It has no effect on deposits.
 </ParamField>
 
+<ParamField body="signature" type="string" required>
+  32-character lowercase hex MD5 of the other top-level fields (lowercased keys in ASCII order, `key=value` joined with `&`, `null` and empty values skipped) followed directly by your signing secret. See the [Signature Generation Guide](/api-reference/signature-guide).
+
+  **Example:** `f2eb65603d36507621fdfd64aba78974`
+</ParamField>
+
 ## Response
 
 <ResponseField name="data" type="object">
@@ -136,71 +132,62 @@ The order is **always accepted**. If no eligible member is available right now, 
 
 <RequestExample>
 ```bash cURL
-# TIMESTAMP / SIGNATURE: see the Signature Generation Guide
-BODY='{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345"}'
-
+# "signature" is computed as described in the Signature Generation Guide.
+# This value is the guide's worked example (example signing secret).
 curl --request POST \
   --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
-  --header "Authorization: Bearer $C2C_API_KEY" \
+  --header "C2C-API-Key: $C2C_API_KEY" \
   --header "Content-Type: application/json" \
-  --header "Idempotency-Key: INV-10045-attempt-1" \
-  --header "X-C2C-Timestamp: $TIMESTAMP" \
-  --header "X-C2C-Signature: $SIGNATURE" \
-  --data "$BODY"
+  --header "Idempotency-Key: INV-10045" \
+  --data '{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345","signature":"f2eb65603d36507621fdfd64aba78974"}'
 ```
 
 ```javascript Node.js
-// signRequest(): see the Signature Generation Guide
-const path = '/api/merchant/orders';
-const body = JSON.stringify({
+// signBody(): see the Signature Generation Guide
+const payload = {
   orderType: 'Deposit',
   amount: 1500,
   currency: 'PKR',
   walletType: 'JazzCash',
   merchantOrderRef: 'INV-10045',
   customerReference: 'player_12345',
-});
+};
 
 const response = await fetch(
-  `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
+  'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders',
   {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'C2C-API-Key': process.env.C2C_API_KEY,
       'Content-Type': 'application/json',
-      'Idempotency-Key': 'INV-10045-attempt-1',
-      ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
+      'Idempotency-Key': 'INV-10045',
     },
-    body,
+    body: JSON.stringify({ ...payload, signature: signBody(payload, process.env.C2C_SIGNING_SECRET) }),
   }
 );
-
 const { data } = await response.json();
 // Persist data.orderId, then redirect the customer to data.paymentPageUrl
 ```
 
 ```python Python
-import json, os, requests
+import os, requests
 
-# sign_request(): see the Signature Generation Guide
-path = "/api/merchant/orders"
-body = json.dumps({
+# sign_body(): see the Signature Generation Guide
+payload = {
     "orderType": "Deposit",
     "amount": 1500,
     "currency": "PKR",
     "walletType": "JazzCash",
     "merchantOrderRef": "INV-10045",
     "customerReference": "player_12345",
-}, separators=(",", ":"))
+}
 
 response = requests.post(
-    f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
-    data=body.encode("utf-8"),
+    "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders",
+    json={**payload, "signature": sign_body(payload, os.environ["C2C_SIGNING_SECRET"])},
     headers={
-        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-        "Content-Type": "application/json",
-        "Idempotency-Key": "INV-10045-attempt-1",
-        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
+        "C2C-API-Key": os.environ["C2C_API_KEY"],
+        "Idempotency-Key": "INV-10045",
     },
 )
 data = response.json()["data"]
@@ -246,7 +233,7 @@ data = response.json()["data"]
 ```json 401 Signature
 {
   "success": false,
-  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "error": "Request signature verification failed. Sign the request as described in the signature guide.",
   "code": "SIGNATURE_INVALID",
   "traceId": "5b269362496001a7ed102e2d8cc50329"
 }
@@ -278,18 +265,17 @@ data = response.json()["data"]
 | `400` | A field fails validation, for example amount ≤ 0, an amount with more than 4 decimal places or too large, an unknown currency, an invalid URL or a value that is too long | `{"error": "..."}`. Multiple messages are joined with `; ` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown `orderType`/`walletType` value | `application/problem+json` with an `errors` object |
 | `401` | API key missing, invalid or revoked | Empty body |
-| `401` | Signature missing, malformed, expired, invalid or replayed | `{"success": false, "error", "code", "traceId"}` |
+| `401` | `signature` missing, malformed, invalid, or replayed under a different `Idempotency-Key` | `{"success": false, "error", "code", "traceId"}` |
 | `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
 | `413` | Body larger than 64 KB | `{"success": false, "error", "code": "PAYLOAD_TOO_LARGE", "traceId"}` |
 | `409` | `merchantOrderRef` is already used by an order that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | The wallet channel is disabled for your account: `JazzCash deposits are disabled for this merchant.` | `{"error": "..."}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
-| `429` | [Rate limit](/api-reference/rate-limits) exceeded | Empty body |
 
 See [Errors](/api-reference/errors) for the complete error model.
 
 <Tip>
-  If a request was rejected (`400`, `409`, `422` …), you can fix it and reuse the same `Idempotency-Key`, because rejected requests don't consume the key. Sign the retry again with a fresh timestamp.
+  If a request was rejected (`400`, `409`, `422` …), you can fix it and reuse the same `Idempotency-Key`, because rejected requests don't consume the key.
 </Tip>
 
 ## What happens next

@@ -25,14 +25,14 @@ The API uses standard HTTP status codes. The body format depends on which layer 
     ```json
     {
       "success": false,
-      "error": "Request signature is missing, malformed, expired, or invalid.",
-      "code": "SIGNATURE_EXPIRED",
+      "error": "Request signature verification failed. Sign the request as described in the signature guide.",
+      "code": "SIGNATURE_INVALID",
       "traceId": "b46d6b4e36bdcf0b90f5527593af8b46"
     }
     ```
   </Tab>
   <Tab title="Malformed requests">
-    Requests that can't be parsed or bound (`400`), such as invalid JSON, an unknown enum value or a missing `Idempotency-Key`, return RFC 9110 problem details:
+    Requests that can't be bound (`400`), such as an unknown enum value or a missing `Idempotency-Key`, return RFC 9110 problem details. (On order creation, a body that isn't valid JSON is rejected earlier, by the signature check, with `401 SIGNATURE_MALFORMED`.)
 
     ```json
     {
@@ -47,7 +47,7 @@ The API uses standard HTTP status codes. The body format depends on which layer 
     ```
   </Tab>
   <Tab title="Empty body">
-    `401` for a missing or invalid **API key**, and `429` rate limiting, return **no body**. Branch on the status code.
+    `401` for a missing or invalid **API key** returns **no body**. Branch on the status code.
   </Tab>
 </Tabs>
 
@@ -61,13 +61,12 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 |--------|---------|--------|
 | `200` | Success. For order creation, also returned when an `Idempotency-Key` replay finds the existing order, and when no member is available yet (the order is accepted as `Awaiting`). | – |
 | `400` | Invalid request: validation failed (including amount precision), malformed JSON, unknown enum value, missing `Idempotency-Key`, or a status query without an order ID or `merchantOrderRef` | No. Fix the request first. |
-| `401` | API key missing or invalid (empty body), **or** request signature rejected (`code` in body) | No. Fix the credentials or signature. Re-sign and retry for `SIGNATURE_EXPIRED` / `SIGNATURE_REPLAYED`. |
+| `401` | API key missing or invalid (empty body), **or** request signature rejected (`code` in body) | No. Fix the credentials or signature. For `SIGNATURE_REPLAYED`, retry with the original `Idempotency-Key`. |
 | `403` | Merchant account not active, or caller IP not in your whitelist | No. Contact C2C. |
 | `404` | Order not found for your merchant account | No |
 | `409` | `merchantOrderRef` already used by an order that is in progress or completed | No. Retry with the same `Idempotency-Key`, or use a new reference for a new payment. |
 | `413` | Request body over 64 KB (`PAYLOAD_TOO_LARGE`) | No. Shrink the body. |
 | `422` | Business rule declined the order: wallet channel disabled, insufficient merchant balance (withdrawals), or `Idempotency-Key` reused with different terms | Channel disabled: no. Insufficient balance: after a top-up. Key reused: no. Use a new key for a new order. |
-| `429` | Rate limit exceeded (empty body) | **Yes**, with backoff |
 | `500` | Unexpected server error (problem details with `traceId`) | **Yes**, with backoff. For order creation, reuse the same `Idempotency-Key`. |
 
 ## Error catalogue
@@ -76,12 +75,11 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 
 | Status | `code` / message | Cause |
 |--------|------------------|-------|
-| `401` | *(empty body)* | `Authorization` header missing, not a Bearer `mk_` key, or the key is unknown or revoked |
-| `401` | `SIGNATURE_REQUIRED` | `X-C2C-Timestamp` or `X-C2C-Signature` missing |
-| `401` | `SIGNATURE_MALFORMED` | Timestamp isn't whole seconds, or the signature isn't `sha256=` + 64 lowercase hex characters |
-| `401` | `SIGNATURE_EXPIRED` | Timestamp more than 300 seconds from C2C's clock |
+| `401` | *(empty body)* | No `C2C-API-Key` (or `Authorization: Bearer mk_...`) header, a `C2C-API-Key` that isn't an `mk_` key, or a key that is unknown or revoked |
+| `401` | `SIGNATURE_REQUIRED` | Order creation body has no `signature` field, or it is `null` or empty |
+| `401` | `SIGNATURE_MALFORMED` | Body isn't a single JSON object, `signature` isn't a string, or a key appears twice in different cases |
 | `401` | `SIGNATURE_INVALID` | Signature doesn't match, or the API key has no signing secret |
-| `401` | `SIGNATURE_REPLAYED` | This exact signed `POST` was already accepted; re-sign retries with a fresh timestamp |
+| `401` | `SIGNATURE_REPLAYED` | The same signed body was already accepted with a different `Idempotency-Key`; retry with the original key |
 | `413` | `PAYLOAD_TOO_LARGE` | Body larger than 64 KB |
 
 See the [Signature Generation Guide](/api-reference/signature-guide#common-mistakes-and-troubleshooting) for fixes.
@@ -97,7 +95,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `400` | `CallbackUrl must be a valid absolute http(s) URL.` | Not an absolute `http://` / `https://` URL. Same for `SuccessUrl` / `FailureUrl`. |
 | `400` | `'Txn Ref Digits Required' must be between 4 and 8. You entered 3.` | Out-of-range option |
 | `400` | Problem details, `errors.Idempotency-Key` | Header missing |
-| `400` | Problem details, `errors.$.walletType` | Unknown `orderType` / `walletType` value or invalid JSON |
+| `400` | Problem details, `errors.$.walletType` | Unknown `orderType` / `walletType` value |
 | `403` | `Merchant account is suspended; new orders are not accepted.` | Account not active |
 | `403` | `IP not in whitelist.` | Your IP whitelist doesn't allow the caller's IP for this order type |
 | `422` | `Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required …` | Withdrawal not covered by your balance, counting fees and withdrawals in progress |
@@ -136,7 +134,6 @@ async function handle(response) {
     case 422:
       // Channel disabled, insufficient balance, or Idempotency-Key reused with different terms
       throw new Error(`Declined: ${body.error}`);
-    case 429:
     case 500:
       throw Object.assign(new Error(`Retryable HTTP ${response.status}`), { retryable: true, traceId: body?.traceId });
     default:

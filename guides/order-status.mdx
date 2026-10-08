@@ -10,7 +10,7 @@ description: "Identifiers, statuses and how to reliably find out the outcome of 
 | `orderId` | `788fcae0-5214-403c-baa2-f318c0eb1b5b` | C2C | **Status queries** and webhook matching. Always store it. |
 | `orderReference` | `ORD-20261008120620-3f6b` | C2C | Human-readable reference shown to the customer and used with support |
 | `merchantOrderRef` | `INV-10045` | You (optional) | Your own reference, echoed in webhooks and [queryable](/api-reference/endpoints/query-order-status#query-by-merchantorderref). One live order per reference (see below). |
-| `Idempotency-Key` | `INV-10045-attempt-1` | You (required) | Safe retries of order creation |
+| `Idempotency-Key` | `INV-10045` | You (required) | Safe retries of order creation |
 
 <Note>
   [Query order status](/api-reference/endpoints/query-order-status) accepts the `orderId` or your `merchantOrderRef`, and works with **any** of your API keys, including after a key rotation. If an order-creation call timed out before you got the `orderId`, retry it with the **same** `Idempotency-Key` (the response contains the original `orderId`), or look the order up by its `merchantOrderRef`.
@@ -99,7 +99,7 @@ Use both mechanisms:
 | `ManualReview` | every 10–15 min |
 | Final status reached | stop |
 
-Each API key can make [100 requests per minute](/api-reference/rate-limits) across all merchant endpoints. Size your polling accordingly.
+The Merchant API has no request rate limits, but prefer webhooks to tight polling loops and stop polling once an order is final.
 
 ## Handling each outcome
 

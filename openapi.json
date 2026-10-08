@@ -3,7 +3,7 @@
   "info": {
     "title": "C2C Merchant API",
     "version": "1.0.0",
-    "description": "Create deposit and withdrawal orders, query order status and wallet balance. Every request is authenticated with a Bearer API key and signed with HMAC-SHA256 (X-C2C-Timestamp / X-C2C-Signature); order creation always enforces the signature and accepts each signature once. See the Signature Generation Guide.",
+    "description": "Create deposit and withdrawal orders, query order status and wallet balance. Every request is authenticated with a merchant API key in the C2C-API-Key header (Authorization: Bearer is also accepted). Deposit and withdrawal requests also carry a WayPay-compatible MD5 'signature' field in the JSON body; order creation always enforces it. The Merchant API has no request rate limits. See the Signature Generation Guide.",
     "contact": {
       "email": "support@c2cplatform.com"
     }
@@ -17,6 +17,9 @@
   "security": [
     {
       "ApiKey": []
+    },
+    {
+      "BearerApiKey": []
     }
   ],
   "tags": [
@@ -35,14 +38,8 @@
         ],
         "operationId": "createOrder",
         "summary": "Create a deposit or withdrawal order",
-        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. Signature enforcement: always on. A signed POST is accepted once (replays \u2192 401 SIGNATURE_REPLAYED).",
+        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key \u2192 401 SIGNATURE_REPLAYED.",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/Timestamp"
-          },
-          {
-            "$ref": "#/components/parameters/Signature"
-          },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
           }
@@ -63,7 +60,8 @@
                     "currency": "PKR",
                     "walletType": "JazzCash",
                     "merchantOrderRef": "INV-10045",
-                    "customerReference": "player_12345"
+                    "customerReference": "player_12345",
+                    "signature": "f2eb65603d36507621fdfd64aba78974"
                   }
                 },
                 "withdrawal": {
@@ -75,7 +73,8 @@
                     "walletType": "Easypaisa",
                     "merchantOrderRef": "PAYOUT-20017",
                     "customerReference": "player_12345",
-                    "customerAccountNumber": "03001234567"
+                    "customerAccountNumber": "03001234567",
+                    "signature": "5db94b5eaf95dba367d124c28cb019f0"
                   }
                 }
               }
@@ -117,7 +116,7 @@
             }
           },
           "401": {
-            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
+            "description": "API key missing, invalid or revoked (empty body); or the body's signature is missing, malformed, invalid or replayed (SignatureError body).",
             "content": {
               "application/json": {
                 "schema": {
@@ -174,9 +173,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
           }
         }
       }
@@ -199,12 +195,6 @@
               "format": "uuid"
             },
             "description": "orderId returned at creation."
-          },
-          {
-            "$ref": "#/components/parameters/Timestamp"
-          },
-          {
-            "$ref": "#/components/parameters/Signature"
           }
         ],
         "responses": {
@@ -227,14 +217,7 @@
             }
           },
           "401": {
-            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SignatureError"
-                }
-              }
-            }
+            "description": "API key missing, invalid or revoked. Empty body."
           },
           "404": {
             "description": "No order with this id for this merchant.",
@@ -248,9 +231,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
           }
         }
       }
@@ -274,12 +254,6 @@
             },
             "description": "The merchantOrderRef sent at order creation (URL-encoded).",
             "example": "INV-10045"
-          },
-          {
-            "$ref": "#/components/parameters/Timestamp"
-          },
-          {
-            "$ref": "#/components/parameters/Signature"
           }
         ],
         "responses": {
@@ -320,14 +294,7 @@
             }
           },
           "401": {
-            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SignatureError"
-                }
-              }
-            }
+            "description": "API key missing, invalid or revoked. Empty body."
           },
           "404": {
             "description": "No order with this merchantOrderRef for this merchant.",
@@ -341,9 +308,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
           }
         }
       }
@@ -355,14 +319,7 @@
         ],
         "operationId": "getBalance",
         "summary": "Query wallet balance",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Timestamp"
-          },
-          {
-            "$ref": "#/components/parameters/Signature"
-          }
-        ],
+        "parameters": [],
         "responses": {
           "200": {
             "description": "Merchant wallet balance.",
@@ -383,14 +340,7 @@
             }
           },
           "401": {
-            "description": "API key missing, invalid or revoked (empty body); or signature rejected (SignatureError body).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SignatureError"
-                }
-              }
-            }
+            "description": "API key missing, invalid or revoked. Empty body."
           },
           "404": {
             "description": "API key not found or inactive.",
@@ -401,9 +351,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Rate limit exceeded (100 requests/minute per API key). Empty body."
           }
         }
       }
@@ -412,35 +359,19 @@
   "components": {
     "securitySchemes": {
       "ApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "C2C-API-Key",
+        "description": "Merchant API key (mk_live_<32 alphanumeric>) sent as C2C-API-Key: mk_live_..."
+      },
+      "BearerApiKey": {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "mk_live_<32 alphanumeric>",
-        "description": "Merchant API key sent as Authorization: Bearer mk_live_..."
+        "description": "Alternative for existing integrations: Authorization: Bearer mk_live_... (C2C-API-Key wins when both are sent)."
       }
     },
     "parameters": {
-      "Timestamp": {
-        "name": "X-C2C-Timestamp",
-        "in": "header",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "pattern": "^[0-9]+$"
-        },
-        "example": "1760000000",
-        "description": "Unix epoch seconds at signing time; must be within 300 seconds of server time."
-      },
-      "Signature": {
-        "name": "X-C2C-Signature",
-        "in": "header",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "pattern": "^sha256=[0-9a-f]{64}$"
-        },
-        "example": "sha256=c1c7c3f90a1b862cd8d9b8c173e59677d7acff2735a7bd9580ed69e18983558c",
-        "description": "sha256= + lowercase hex HMAC-SHA256 of \"{timestamp}\\n{METHOD}\\n{path+query}\\n{hex sha256(raw body)}\" keyed with the API key's signing secret (sksec_...)."
-      },
       "IdempotencyKey": {
         "name": "Idempotency-Key",
         "in": "header",
@@ -449,7 +380,7 @@
           "type": "string",
           "maxLength": 100
         },
-        "description": "Unique per order attempt and API key. A repeat with the same terms returns the original order; a repeat with different terms (orderType, amount, walletType, currency, merchantOrderRef, customerAccountNumber) returns 422."
+        "description": "Unique per order and API key; reuse it for every retry of that order. A repeat with the same terms returns the original order; a repeat with different terms (orderType, amount, walletType, currency, merchantOrderRef, customerAccountNumber) returns 422. The same signed body sent with a different key within 24 hours returns 401 SIGNATURE_REPLAYED."
       }
     },
     "schemas": {
@@ -590,7 +521,8 @@
         "required": [
           "orderType",
           "amount",
-          "walletType"
+          "walletType",
+          "signature"
         ],
         "properties": {
           "orderType": {
@@ -677,6 +609,11 @@
             "maximum": 10,
             "default": 3,
             "description": "Withdrawals: reassignment attempts after the payout window passes."
+          },
+          "signature": {
+            "type": "string",
+            "example": "f2eb65603d36507621fdfd64aba78974",
+            "description": "Lowercase hex MD5 (32 characters) of the other top-level fields, excluding null, empty-string, object and array values: keys lowercased, sorted in ASCII order, joined as key=value with '&', followed directly by the API key's signing secret (sksec_...). Values are signed as written in the body."
           }
         }
       },
@@ -840,7 +777,6 @@
             "enum": [
               "SIGNATURE_REQUIRED",
               "SIGNATURE_MALFORMED",
-              "SIGNATURE_EXPIRED",
               "SIGNATURE_INVALID",
               "SIGNATURE_REPLAYED",
               "PAYLOAD_TOO_LARGE"

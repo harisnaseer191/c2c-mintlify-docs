@@ -16,8 +16,8 @@ Your backend talks to one API, and C2C handles member assignment, payment instru
 
 ```mermaid
 flowchart LR
-    A[Get API key<br/>and signing secret] --> B[Authenticate<br/>Bearer API key]
-    B --> C[Sign request<br/>HMAC-SHA256]
+    A[Get API key<br/>and signing secret] --> B[Authenticate<br/>C2C-API-Key header]
+    B --> C[Sign order body<br/>MD5 signature field]
     C --> D[Create deposit<br/>or withdrawal]
     D --> E[Store orderId<br/>redirect customer for deposits]
     E --> F[Webhook and/or<br/>status query]
@@ -32,7 +32,7 @@ flowchart LR
     Endpoints, fields, responses and errors
   </Card>
   <Card title="Signature Generation Guide" icon="signature" href="/api-reference/signature-guide">
-    Required for every request. Code in C#, Node.js, Python and PHP.
+    Required for deposits and withdrawals. Code in C#, Node.js and Python.
   </Card>
   <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
     Signed callbacks when orders complete or fail
@@ -61,13 +61,13 @@ flowchart LR
 | | |
 |---|---|
 | **Style** | REST, JSON, HTTPS |
-| **Authentication** | `Authorization: Bearer mk_live_...` |
-| **Request signing** | HMAC-SHA256 (`X-C2C-Timestamp`, `X-C2C-Signature`). Always enforced for deposits and withdrawals. |
+| **Authentication** | `C2C-API-Key: mk_live_...` header (`Authorization: Bearer` also accepted) |
+| **Request signing** | MD5 `signature` field in the body (WayPay-compatible). Always enforced for deposits and withdrawals. |
 | **Idempotency** | `Idempotency-Key` header required on order creation |
 | **Wallets** | JazzCash, Easypaisa, Till ID, bank account (enabled per merchant) |
 | **Currencies** | PKR (default), INR, BDT |
 | **Notifications** | Webhooks `order.completed` / `order.failed` + status polling |
-| **Rate limit** | 100 requests per minute per API key |
+| **Rate limits** | None on the Merchant API |
 
 ## Need help?
 

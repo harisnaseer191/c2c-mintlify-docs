@@ -147,7 +147,7 @@ X-C2C-Timestamp: 1791461502
 
 ## Verifying the signature
 
-Webhooks are signed with your API key's **signing secret** (`sksec_...`), the same secret you use to [sign API requests](/api-reference/signature-guide). No separate webhook secret is needed.
+Webhooks are signed with your API key's **signing secret** (`sksec_...`), the same secret you use to [sign order requests](/api-reference/signature-guide). No separate webhook secret is needed. The algorithm is different, though: webhooks use HMAC-SHA256 over the raw body, as described below, while your order requests use the MD5 `signature` field.
 
 Which key's secret is used:
 

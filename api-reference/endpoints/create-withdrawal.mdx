@@ -13,7 +13,7 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 | | |
 |---|---|
 | **API key** | Required |
-| **Signature** | **Required, always enforced.** See the [Signature Generation Guide](/api-reference/signature-guide) |
+| **Signature** | **Required**, in the body's `signature` field. See the [Signature Generation Guide](/api-reference/signature-guide) |
 | **Idempotency-Key** | Required |
 
 <Info>
@@ -22,17 +22,8 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 
 ## Headers
 
-<ParamField header="Authorization" type="string" required>
-  `Bearer mk_live_...`, your merchant API key.
-</ParamField>
-
-<ParamField header="X-C2C-Timestamp" type="string" required>
-  Unix time in seconds when the request was signed. Must be within 300 seconds of C2C's clock.
-</ParamField>
-
-<ParamField header="X-C2C-Signature" type="string" required>
-  `sha256=` + lowercase hex HMAC-SHA256 of `{timestamp}\n{METHOD}\n{path}\n{hex(sha256(body))}`, keyed with your signing secret.
-  The signature covers the whole body, so the payout account number and amount cannot be changed in transit.
+<ParamField header="C2C-API-Key" type="string" required>
+  `mk_live_...`, your merchant API key. `Authorization: Bearer mk_live_...` is also accepted.
 </ParamField>
 
 <ParamField header="Idempotency-Key" type="string" required>
@@ -107,6 +98,14 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
   Accepted (`4` to `8`), but only used by the deposit payment page.
 </ParamField>
 
+<ParamField body="signature" type="string" required>
+  32-character lowercase hex MD5 of the other top-level fields (lowercased keys in ASCII order, `key=value` joined with `&`, `null` and empty values skipped) followed directly by your signing secret. See the [Signature Generation Guide](/api-reference/signature-guide).
+
+  `amount`, `customerAccountNumber` and every other field you send are signed, so the payout can't be changed in transit.
+
+  **Example:** `5db94b5eaf95dba367d124c28cb019f0`
+</ParamField>
+
 ## Response
 
 <ResponseField name="data" type="object">
@@ -137,23 +136,19 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 
 <RequestExample>
 ```bash cURL
-# TIMESTAMP / SIGNATURE: see the Signature Generation Guide
-BODY='{"orderType":"Withdrawal","amount":2000,"currency":"PKR","walletType":"Easypaisa","merchantOrderRef":"PAYOUT-20017","customerReference":"player_12345","customerAccountNumber":"03001234567"}'
-
+# "signature" is computed as described in the Signature Generation Guide.
+# This value is the guide's worked example (example signing secret).
 curl --request POST \
   --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
-  --header "Authorization: Bearer $C2C_API_KEY" \
+  --header "C2C-API-Key: $C2C_API_KEY" \
   --header "Content-Type: application/json" \
   --header "Idempotency-Key: PAYOUT-20017" \
-  --header "X-C2C-Timestamp: $TIMESTAMP" \
-  --header "X-C2C-Signature: $SIGNATURE" \
-  --data "$BODY"
+  --data '{"orderType":"Withdrawal","amount":2000,"currency":"PKR","walletType":"Easypaisa","merchantOrderRef":"PAYOUT-20017","customerReference":"player_12345","customerAccountNumber":"03001234567","signature":"5db94b5eaf95dba367d124c28cb019f0"}'
 ```
 
 ```javascript Node.js
-// signRequest(): see the Signature Generation Guide
-const path = '/api/merchant/orders';
-const body = JSON.stringify({
+// signBody(): see the Signature Generation Guide
+const payload = {
   orderType: 'Withdrawal',
   amount: 2000,
   currency: 'PKR',
@@ -161,19 +156,18 @@ const body = JSON.stringify({
   merchantOrderRef: 'PAYOUT-20017',
   customerReference: 'player_12345',
   customerAccountNumber: '03001234567',
-});
+};
 
 const response = await fetch(
-  `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
+  'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders',
   {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'C2C-API-Key': process.env.C2C_API_KEY,
       'Content-Type': 'application/json',
       'Idempotency-Key': 'PAYOUT-20017',
-      ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
     },
-    body,
+    body: JSON.stringify({ ...payload, signature: signBody(payload, process.env.C2C_SIGNING_SECRET) }),
   }
 );
 const { data } = await response.json();
@@ -181,11 +175,10 @@ const { data } = await response.json();
 ```
 
 ```python Python
-import json, os, requests
+import os, requests
 
-# sign_request(): see the Signature Generation Guide
-path = "/api/merchant/orders"
-body = json.dumps({
+# sign_body(): see the Signature Generation Guide
+payload = {
     "orderType": "Withdrawal",
     "amount": 2000,
     "currency": "PKR",
@@ -193,16 +186,14 @@ body = json.dumps({
     "merchantOrderRef": "PAYOUT-20017",
     "customerReference": "player_12345",
     "customerAccountNumber": "03001234567",
-}, separators=(",", ":"))
+}
 
 response = requests.post(
-    f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
-    data=body.encode("utf-8"),
+    "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders",
+    json={**payload, "signature": sign_body(payload, os.environ["C2C_SIGNING_SECRET"])},
     headers={
-        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-        "Content-Type": "application/json",
+        "C2C-API-Key": os.environ["C2C_API_KEY"],
         "Idempotency-Key": "PAYOUT-20017",
-        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
     },
 )
 order_id = response.json()["data"]["orderId"]
@@ -247,7 +238,7 @@ order_id = response.json()["data"]["orderId"]
 ```json 401 Signature
 {
   "success": false,
-  "error": "Request signature is missing, malformed, expired, or invalid.",
+  "error": "The request body must include a 'signature' field.",
   "code": "SIGNATURE_REQUIRED",
   "traceId": "b7e7de9cb3606f164c88c36419ed8e7b"
 }
@@ -279,14 +270,13 @@ order_id = response.json()["data"]["orderId"]
 | `400` | Validation failed, for example `customerAccountNumber` missing or too long, amount ≤ 0, an amount with more than 4 decimal places or too large, or an unknown currency | `{"error": "..."}` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown enum value | `application/problem+json` |
 | `401` | API key missing, invalid or revoked | Empty body |
-| `401` | Signature missing, malformed, expired, invalid or replayed | `{"success": false, "error", "code", "traceId"}` |
+| `401` | `signature` missing, malformed, invalid, or replayed under a different `Idempotency-Key` | `{"success": false, "error", "code", "traceId"}` |
 | `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
 | `413` | Body larger than 64 KB | `{"code": "PAYLOAD_TOO_LARGE", ...}` |
 | `409` | `merchantOrderRef` is already used by a payout that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | Your available balance can't cover this payout plus fee and the withdrawals already in progress | `{"error": "Insufficient merchant balance: ..."}` |
 | `422` | The wallet channel is disabled for withdrawals on your account | `{"error": "..."}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
-| `429` | [Rate limit](/api-reference/rate-limits) exceeded | Empty body |
 
 ## Funding check
 

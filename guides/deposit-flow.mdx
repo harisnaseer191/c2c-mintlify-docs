@@ -43,7 +43,7 @@ sequenceDiagram
 Your backend calls [Create Deposit Order](/api-reference/endpoints/create-deposit) with a signed request and an `Idempotency-Key`. Before creating anything, C2C checks:
 
 1. **API key** valid and active, otherwise `401`
-2. **Signature** valid and recent, otherwise `401`. Deposits are always signature-enforced.
+2. **Signature** (the body's `signature` field) valid, otherwise `401`. Deposits are always signature-enforced.
 3. **Request** valid, otherwise `400`
 4. **Merchant account** active and **IP whitelist** passed, otherwise `403`
 5. **Wallet channel** enabled for deposits on your account, otherwise `422`
@@ -114,26 +114,24 @@ stateDiagram-v2
 
 <CodeGroup>
 ```javascript Node.js
-// 1. Create the order (signRequest: see the Signature Generation Guide)
+// 1. Create the order (signBody: see the Signature Generation Guide)
 async function startDeposit(cart) {
-  const path = '/api/merchant/orders';
-  const body = JSON.stringify({
+  const payload = {
     orderType: 'Deposit',
     amount: cart.total,
     currency: 'PKR',
     walletType: 'JazzCash',
     merchantOrderRef: cart.id,
     customerReference: cart.customerId,
-  });
-  const res = await fetch(BASE_URL + path, {
+  };
+  const res = await fetch(`${BASE_URL}/api/merchant/orders`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+      'C2C-API-Key': process.env.C2C_API_KEY,
       'Content-Type': 'application/json',
       'Idempotency-Key': `${cart.id}-deposit`,
-      ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),
     },
-    body,
+    body: JSON.stringify({ ...payload, signature: signBody(payload, process.env.C2C_SIGNING_SECRET) }),
   });
   if (!res.ok) throw new Error(`Create deposit failed: HTTP ${res.status} ${await res.text()}`);
   const { data } = await res.json();
@@ -153,25 +151,26 @@ async function onC2COrderUpdate(orderId) {
 ```
 
 ```python Python
-import json, os, requests
+import os, requests
 
-# sign_request(): see the Signature Generation Guide
+# sign_body(): see the Signature Generation Guide
 def start_deposit(cart) -> str:
-    path = "/api/merchant/orders"
-    body = json.dumps({
+    payload = {
         "orderType": "Deposit",
         "amount": cart.total,
         "currency": "PKR",
         "walletType": "JazzCash",
         "merchantOrderRef": cart.id,
         "customerReference": cart.customer_id,
-    }, separators=(",", ":"))
-    res = requests.post(BASE_URL + path, data=body.encode("utf-8"), headers={
-        "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-        "Content-Type": "application/json",
-        "Idempotency-Key": f"{cart.id}-deposit",
-        **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),
-    })
+    }
+    res = requests.post(
+        f"{BASE_URL}/api/merchant/orders",
+        json={**payload, "signature": sign_body(payload, os.environ["C2C_SIGNING_SECRET"])},
+        headers={
+            "C2C-API-Key": os.environ["C2C_API_KEY"],
+            "Idempotency-Key": f"{cart.id}-deposit",
+        },
+    )
     res.raise_for_status()
     data = res.json()["data"]
     db.save_c2c_order(cart.id, data["orderId"], data["status"])

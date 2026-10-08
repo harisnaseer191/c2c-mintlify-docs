@@ -13,20 +13,12 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
 | | |
 |---|---|
 | **API key** | Required |
-| **Signature** | Required. Sign the request with an empty body; see the [Signature Generation Guide](/api-reference/signature-guide). |
+| **Signature** | Not required. Read-only requests are authenticated by the API key alone. |
 
 ## Headers
 
-<ParamField header="Authorization" type="string" required>
-  `Bearer mk_live_...`, any of your merchant API keys.
-</ParamField>
-
-<ParamField header="X-C2C-Timestamp" type="string" required>
-  Unix time in seconds when the request was signed.
-</ParamField>
-
-<ParamField header="X-C2C-Signature" type="string" required>
-  Signature over `{timestamp}\nGET\n/api/merchant/orders/{id}/status\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. The last part is the SHA-256 of the empty body.
+<ParamField header="C2C-API-Key" type="string" required>
+  `mk_live_...`, any of your merchant API keys. `Authorization: Bearer mk_live_...` is also accepted.
 </ParamField>
 
 ## Path parameters
@@ -98,26 +90,16 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
 
 <RequestExample>
 ```bash cURL
-# SIGNATURE: see the Signature Generation Guide (GET → empty body)
 curl --request GET \
   --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/788fcae0-5214-403c-baa2-f318c0eb1b5b/status \
-  --header "Authorization: Bearer $C2C_API_KEY" \
-  --header "X-C2C-Timestamp: $TIMESTAMP" \
-  --header "X-C2C-Signature: $SIGNATURE"
+  --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
 ```javascript Node.js
-// signRequest(): see the Signature Generation Guide
 async function getOrderStatus(orderId) {
-  const path = `/api/merchant/orders/${orderId}/status`;
   const response = await fetch(
-    `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io${path}`,
-    {
-      headers: {
-        'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
-        ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
-      },
-    }
+    `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/${orderId}/status`,
+    { headers: { 'C2C-API-Key': process.env.C2C_API_KEY } }
   );
   if (!response.ok) throw new Error(`Status query failed: HTTP ${response.status}`);
   return (await response.json()).data;
@@ -127,15 +109,10 @@ async function getOrderStatus(orderId) {
 ```python Python
 import os, requests
 
-# sign_request(): see the Signature Generation Guide
 def get_order_status(order_id: str) -> dict:
-    path = f"/api/merchant/orders/{order_id}/status"
     response = requests.get(
-        f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io{path}",
-        headers={
-            "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-            **sign_request(os.environ["C2C_SIGNING_SECRET"], "GET", path, ""),
-        },
+        f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/{order_id}/status",
+        headers={"C2C-API-Key": os.environ["C2C_API_KEY"]},
     )
     response.raise_for_status()
     return response.json()["data"]
@@ -270,7 +247,7 @@ def get_order_status(order_id: str) -> dict:
 - Prefer [webhooks](/guides/webhooks) and poll as a fallback or to reconcile.
 - Poll every **5–10 seconds** while the customer is on the payment page, then back off (for example every minute) for orders waiting on a member.
 - Stop polling once the status is final.
-- Each API key has a [rate limit](/api-reference/rate-limits) of 100 requests per minute across all merchant endpoints. Don't poll many orders in tight loops.
+- The Merchant API has no request rate limits, but don't poll many orders in tight loops; webhooks scale better.
 - `ManualReview` sends no webhook until C2C resolves it, so poll those orders at a low frequency until they are final.
 - You can branch on `stage` instead of `status`: `Completed` is success, `Failed` is final without settlement, anything else is in progress.
 
@@ -294,9 +271,7 @@ async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 
 | Status | When | Body |
 |--------|------|------|
 | `401` | API key missing, invalid or revoked | Empty body |
-| `401` | Signature rejected (when enforced for this endpoint) | `{"success": false, "error", "code", "traceId"}` |
 | `404` | No order with this ID for your merchant account | `{"error": "Order not found."}` |
-| `429` | Rate limit exceeded | Empty body |
 
 ## Query by `merchantOrderRef`
 
@@ -304,23 +279,17 @@ async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 
 GET /api/merchant/orders/status?merchantOrderRef={merchantOrderRef}
 ```
 
-Returns the **latest** order your merchant account created with this `merchantOrderRef`, in exactly the same response shape as above. Use it when you didn't get the `orderId` back, for example after a timeout. Authentication, signature and rate-limit rules are the same as for the lookup by ID.
+Returns the **latest** order your merchant account created with this `merchantOrderRef`, in exactly the same response shape as above. Use it when you didn't get the `orderId` back, for example after a timeout. Authentication works the same as for the lookup by ID: API key only, no signature.
 
 <ParamField query="merchantOrderRef" type="string" required>
   Your `merchantOrderRef` from order creation. URL-encode it.
 </ParamField>
 
-Sign the path **including the query string**, exactly as sent: `{timestamp}\nGET\n/api/merchant/orders/status?merchantOrderRef=INV-10045\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
-
 ```javascript Node.js
-// signRequest(): see the Signature Generation Guide
 async function getOrderStatusByRef(merchantOrderRef) {
   const path = `/api/merchant/orders/status?merchantOrderRef=${encodeURIComponent(merchantOrderRef)}`;
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: {
-      'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
-      ...signRequest(process.env.C2C_SIGNING_SECRET, 'GET', path, ''),
-    },
+    headers: { 'C2C-API-Key': process.env.C2C_API_KEY },
   });
   if (!response.ok) throw new Error(`Status query failed: HTTP ${response.status}`);
   return (await response.json()).data;
@@ -330,9 +299,8 @@ async function getOrderStatusByRef(merchantOrderRef) {
 | Status | When | Body |
 |--------|------|------|
 | `400` | `merchantOrderRef` missing or empty | `{"error": "Provide an order id or a merchantOrderRef."}` |
-| `401` | API key or signature rejected | As above |
+| `401` | API key missing, invalid or revoked | Empty body |
 | `404` | No order with this `merchantOrderRef` for your merchant account | `{"error": "Order not found."}` |
-| `429` | Rate limit exceeded | Empty body |
 
 <Note>
   A reference can belong to several orders only when the earlier ones failed (see [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules)). This endpoint always returns the most recent one; use the `orderId` to query an older order.

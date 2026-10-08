@@ -10,7 +10,7 @@ The C2C Merchant API lets your backend accept **deposits** from and send **withd
 The API is REST over HTTPS with JSON request and response bodies, and uses standard HTTP status codes.
 
 <Note>
-  Every request is authenticated with your API key **and signed** with your signing secret. Deposit and withdrawal creation **always** reject unsigned requests. See [Authentication](/api-reference/authentication) and the [Signature Generation Guide](/api-reference/signature-guide).
+  Every request is authenticated with your API key. Deposit and withdrawal requests are also **signed** with your signing secret, and unsigned ones are **always** rejected. See [Authentication](/api-reference/authentication) and the [Signature Generation Guide](/api-reference/signature-guide).
 </Note>
 
 ## Base URL
@@ -48,7 +48,7 @@ All paths in this reference are relative to the base URL, for example `POST /api
     Check the available and frozen funds in your C2C merchant wallet.
   </Card>
   <Card title="Signed requests" icon="signature" href="/api-reference/signature-guide">
-    HMAC-SHA256 request signing proves each request came from you and was not tampered with.
+    A WayPay-compatible MD5 signature proves each order request came from you and was not tampered with.
   </Card>
   <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
     Receive a signed callback when an order completes or fails.
@@ -59,11 +59,13 @@ All paths in this reference are relative to the base URL, for example `POST /api
 
 | Capability | Method & path | Signature |
 |------------|---------------|-----------|
-| [Query wallet balance](/api-reference/endpoints/query-balance) | `GET /api/merchant/orders/balance` | Sign every request |
+| [Query wallet balance](/api-reference/endpoints/query-balance) | `GET /api/merchant/orders/balance` | Not required |
 | [Create deposit order](/api-reference/endpoints/create-deposit) | `POST /api/merchant/orders` with `"orderType": "Deposit"` | **Always enforced** |
 | [Create withdrawal order](/api-reference/endpoints/create-withdrawal) | `POST /api/merchant/orders` with `"orderType": "Withdrawal"` | **Always enforced** |
-| [Query order status](/api-reference/endpoints/query-order-status) | `GET /api/merchant/orders/{id}/status` | Sign every request |
-| [Query order status by reference](/api-reference/endpoints/query-order-status#query-by-merchantorderref) | `GET /api/merchant/orders/status?merchantOrderRef={ref}` | Sign every request |
+| [Query order status](/api-reference/endpoints/query-order-status) | `GET /api/merchant/orders/{id}/status` | Not required |
+| [Query order status by reference](/api-reference/endpoints/query-order-status#query-by-merchantorderref) | `GET /api/merchant/orders/status?merchantOrderRef={ref}` | Not required |
+
+The Merchant API doesn't apply request rate limits.
 
 Deposits and withdrawals share a single endpoint. The `orderType` field decides which flow the order follows.
 
@@ -110,7 +112,7 @@ Error responses are described in [Errors](/api-reference/errors).
     C2C issues your **API key** (`mk_live_...`) and **signing secret** (`sksec_...`). Each is shown only once.
   </Step>
   <Step title="Authenticate and sign">
-    Send `Authorization: Bearer <api key>` and sign each request with `X-C2C-Timestamp` and `X-C2C-Signature`.
+    Send your key in the `C2C-API-Key` header, and add a `signature` field to every deposit and withdrawal body.
   </Step>
   <Step title="Create a deposit or withdrawal">
     `POST /api/merchant/orders` with a unique `Idempotency-Key`. Store the returned `orderId`.
@@ -139,7 +141,7 @@ A machine-readable OpenAPI 3.1 description of the merchant endpoints is publishe
     Send your API key with each request
   </Card>
   <Card title="Signature Generation Guide" icon="signature" href="/api-reference/signature-guide">
-    Sign requests in C#, Node.js, Python or PHP
+    Sign requests in C#, Node.js or Python
   </Card>
   <Card title="Create a deposit" icon="arrow-down-to-line" href="/api-reference/endpoints/create-deposit">
     Collect your first payment

@@ -70,7 +70,7 @@
           },
           {
             "group": "Reference",
-            "pages": ["api-reference/idempotency", "api-reference/rate-limits", "api-reference/errors"]
+            "pages": ["api-reference/idempotency", "api-reference/errors"]
           }
         ]
       }
@@ -97,7 +97,8 @@
     { "source": "/signing", "destination": "/api-reference/signature-guide" },
     { "source": "/webhooks", "destination": "/guides/webhooks" },
     { "source": "/idempotency", "destination": "/api-reference/idempotency" },
-    { "source": "/rate-limits", "destination": "/api-reference/rate-limits" },
+    { "source": "/rate-limits", "destination": "/api-reference/introduction" },
+    { "source": "/api-reference/rate-limits", "destination": "/api-reference/introduction" },
     { "source": "/errors", "destination": "/api-reference/errors" },
     { "source": "/guides/server-integration", "destination": "/quickstart" }
   ],

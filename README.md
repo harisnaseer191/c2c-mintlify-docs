@@ -28,12 +28,13 @@ mint broken-links
 - Endpoint pages under `api-reference/endpoints/` describe `MerchantOrdersController`
   (`src/C2C.API/Controllers/MerchantOrdersController.cs`). Update them with any change to its request/response
   contracts, validators (`CreateMerchantOrderCommandValidator`) or error messages.
-- The signature worked examples in `api-reference/signature-guide.mdx` are pinned by
-  `MerchantSignatureServiceTests.WhenUsingDocumentedWorkedExample_VerifyAsync_ReturnsValidAsync`. If you change
+- Request signing follows WayPay's scheme (MD5 `signature` field in the body). The worked examples in
+  `api-reference/signature-guide.mdx` are pinned by
+  `MerchantRequestSignatureTests.WhenUsingDocumentedWorkedExample_Compute_MatchesPublishedSignature`. If you change
   them, update the test (and vice versa).
 - `openapi.json` is the published, hand-maintained merchant spec. The API also generates its own spec at
-  `/openapi/v1.json` in Development (signature headers are added automatically for `[RequireSignature]`
-  endpoints) — use it to cross-check.
+  `/openapi/v1.json` in Development (the `signature` body field and the 401/413 signature responses are
+  documented automatically for `[RequireSignature]` endpoints) — use it to cross-check.
 - `mobile-api.md` documents the member mobile API and is excluded from the site via `.mintignore`.
 
 ## Project structure
@@ -55,7 +56,6 @@ mint broken-links
     ├── signature-guide.mdx
     ├── authentication.mdx
     ├── idempotency.mdx
-    ├── rate-limits.mdx
     ├── errors.mdx
     └── endpoints/
         ├── query-balance.mdx

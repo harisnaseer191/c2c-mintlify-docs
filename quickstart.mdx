@@ -3,7 +3,7 @@ title: "Quickstart"
 description: "Create and track your first signed deposit order in a few steps."
 ---
 
-This guide takes you from credentials to a completed deposit. Examples use Node.js 18+; the [Signature Generation Guide](/api-reference/signature-guide) has the same helper in C#, Python and PHP.
+This guide takes you from credentials to a completed deposit. Examples use Node.js 18+; the [Signature Generation Guide](/api-reference/signature-guide) has the same helper in C# and Python.
 
 <Steps>
   <Step title="Get your credentials">
@@ -18,38 +18,45 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
     Optionally, set a default callback URL for [webhooks](/guides/webhooks) in **Merchant Portal → Settings**.
   </Step>
 
-  <Step title="Add the signing helper">
-    Every request is signed. Deposit and withdrawal creation **reject** unsigned requests.
+  <Step title="Add the API helper">
+    Every request carries your API key in the `C2C-API-Key` header. Deposit and withdrawal requests also carry a `signature` field in the body; C2C **rejects** them without one. Status and balance requests aren't signed.
 
     ```javascript c2c.js
     const crypto = require('crypto');
 
     const BASE_URL = process.env.C2C_BASE_URL;
 
-    function signRequest(secret, method, pathAndQuery, body = '', timestamp = Math.floor(Date.now() / 1000)) {
-      const bodyHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
-      const stringToSign = `${timestamp}\n${method.toUpperCase()}\n${pathAndQuery}\n${bodyHash}`;
-      const hmac = crypto.createHmac('sha256', secret).update(stringToSign, 'utf8').digest('hex');
-      return { 'X-C2C-Timestamp': String(timestamp), 'X-C2C-Signature': `sha256=${hmac}` };
+    function signBody(payload, signingSecret) {
+      const params = Object.entries(payload)
+        .filter(([key, value]) =>
+          key.toLowerCase() !== 'signature' &&
+          value !== null && value !== undefined && value !== '' &&
+          typeof value !== 'object')                                  // objects and arrays are not signed
+        .map(([key, value]) => [key.toLowerCase(), String(value)])
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));           // ASCII order of the lowercase keys
+
+      const queryString = params.map(([key, value]) => `${key}=${value}`).join('&');
+      return crypto.createHash('md5').update(queryString + signingSecret, 'utf8').digest('hex');
     }
 
     async function c2c(method, path, payload, extraHeaders = {}) {
-      const body = payload === undefined ? '' : JSON.stringify(payload); // serialize ONCE
+      const body = payload === undefined
+        ? undefined
+        : JSON.stringify({ ...payload, signature: signBody(payload, process.env.C2C_SIGNING_SECRET) });
       const response = await fetch(BASE_URL + path, {
         method,
         headers: {
-          'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+          'C2C-API-Key': process.env.C2C_API_KEY,
           ...(body ? { 'Content-Type': 'application/json' } : {}),
           ...extraHeaders,
-          ...signRequest(process.env.C2C_SIGNING_SECRET, method, path, body),
         },
-        body: body || undefined,                                           // send the signed string
+        body,
       });
       const text = await response.text();
       return { status: response.status, body: text ? JSON.parse(text) : null };
     }
 
-    module.exports = { c2c, signRequest };
+    module.exports = { c2c, signBody };
     ```
   </Step>
 
@@ -62,12 +69,12 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
     // { status: 200, body: { data: { availableBalance: 0.0, frozenBalance: 0.0, currency: 'PKR' } } }
     ```
 
-    A `401` with an empty body means the API key is wrong. A `401` with a `code` means the signature is wrong. See [troubleshooting](/api-reference/signature-guide#common-mistakes-and-troubleshooting).
+    A `401` here means the API key is wrong. Check your signing code separately against the [worked examples](/api-reference/signature-guide#worked-examples): on order creation, a `401` with a `code` means the signature is wrong. See [troubleshooting](/api-reference/signature-guide#common-mistakes-and-troubleshooting).
   </Step>
 
   <Step title="Create a deposit order">
     ```javascript
-    const idempotencyKey = 'INV-10045-attempt-1';   // persist this with your order first
+    const idempotencyKey = 'INV-10045';   // persist this with your order first
 
     const { status, body } = await c2c('POST', '/api/merchant/orders', {
       orderType: 'Deposit',
@@ -141,12 +148,12 @@ Keep your merchant wallet funded. A withdrawal is accepted only if your availabl
 <AccordionGroup>
   <Accordion title="Security">
     - API key and signing secret stored in a secret manager, never in client code or logs
-    - Every request signed. Your code reproduces the [worked example](/api-reference/signature-guide#worked-example).
+    - Every deposit and withdrawal request signed. Your code reproduces the [worked examples](/api-reference/signature-guide#worked-examples).
     - Webhook signatures verified with a constant-time comparison
   </Accordion>
   <Accordion title="Reliability">
     - `Idempotency-Key` persisted before the first attempt and reused on every retry
-    - `429` and `5xx` retried with backoff; requests re-signed on every attempt
+    - `5xx` and network errors retried with backoff, resending the same body with the same `Idempotency-Key`
     - Reconciliation job polls orders that haven't reached a final status
   </Accordion>
   <Accordion title="Business logic">

@@ -11,11 +11,11 @@ Network failures happen: a request can time out after C2C has already created th
 
 ```http
 POST /api/merchant/orders HTTP/1.1
-Authorization: Bearer mk_live_...
-Idempotency-Key: INV-10045-attempt-1
-X-C2C-Timestamp: 1760000000
-X-C2C-Signature: sha256=...
+C2C-API-Key: mk_live_...
+Idempotency-Key: INV-10045
 Content-Type: application/json
+
+{"orderType":"Deposit","amount":1500, ... ,"signature":"..."}
 ```
 
 ## How it works
@@ -25,7 +25,8 @@ Content-Type: application/json
 | New key, order created | `200` with the new order. The key is now bound to that order. |
 | Same key again with the **same terms** (same API key) | `200` with the **original** order: same `orderId` and `orderReference`, and the order's **current** `status` and `stage`. No new order is created. |
 | Same key again with **different terms** (same API key) | `422` `This Idempotency-Key was already used for a different order request.` No order is created or returned. |
-| Same key, but the first request was **rejected** (`400`, `401`, `403`, `409`, `413`, `422`, `429`) | Treated as a new key. Rejected requests don't consume the key. |
+| Same key, but the first request was **rejected** (`400`, `401`, `403`, `409`, `413`, `422`) | Treated as a new key. Rejected requests don't consume the key. |
+| Same signed body with a **different** key (same API key, within 24 hours) | `401 SIGNATURE_REPLAYED`. A body's signature is bound to the first key it was accepted with. See [Replay protection](/api-reference/signature-guide#replay-protection). |
 | Same key used with a **different** API key | Treated as a new key. Keys are scoped per API key. |
 
 The **terms** compared are `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` and `customerAccountNumber`. Other fields (for example `callbackUrl` or `metadata`) aren't compared.
@@ -40,30 +41,29 @@ The **terms** compared are `orderType`, `amount`, `walletType`, `currency`, `mer
 
 ## Key rules
 
-- **Format:** any string up to **100 characters**. Use a value you can regenerate deterministically, for example `"{yourOrderId}-attempt-{n}"`, or a UUID that you store with your order.
+- **Format:** any string up to **100 characters**. Use **one key per order**, for example your own order ID or a UUID that you store with your order, and reuse it for every attempt at that order.
 - **Lifetime:** keys don't expire. A key stays bound to its order permanently.
-- **Signature:** a retry is a new request. Sign it again with a **fresh timestamp** and wait at least one second, or it's rejected as `SIGNATURE_REPLAYED` (see [Replay protection](/api-reference/signature-guide#replay-protection)). The `Idempotency-Key` stays the same.
+- **Signature:** retry with the same body, the same `signature` and the same `Idempotency-Key`. There's nothing to re-sign. Sending the same signed body with a **new** key is rejected as `SIGNATURE_REPLAYED`, even if the first attempt was rejected, so don't switch keys between attempts at the same order.
 - **Concurrent duplicates:** if several requests with the same key arrive at the same time, only one order is created and every request gets that order back.
 
 ## Safe retry pattern
 
 <CodeGroup>
 ```javascript Node.js
-// signRequest(): see the Signature Generation Guide
+// signBody(): see the Signature Generation Guide
 async function createOrderWithRetry(order, idempotencyKey, maxAttempts = 4) {
-  const path = '/api/merchant/orders';
-  const body = JSON.stringify(order);
+  // Sign once: every attempt sends the same body and the same key
+  const body = JSON.stringify({ ...order, signature: signBody(order, process.env.C2C_SIGNING_SECRET) });
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let response;
     try {
-      response = await fetch(BASE_URL + path, {
+      response = await fetch(`${BASE_URL}/api/merchant/orders`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.C2C_API_KEY}`,
+          'C2C-API-Key': process.env.C2C_API_KEY,
           'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,                                   // same key on every attempt
-          ...signRequest(process.env.C2C_SIGNING_SECRET, 'POST', path, body),  // fresh signature per attempt
+          'Idempotency-Key': idempotencyKey,   // same key on every attempt
         },
         body,
         signal: AbortSignal.timeout(15000),
@@ -73,7 +73,7 @@ async function createOrderWithRetry(order, idempotencyKey, maxAttempts = 4) {
     }
 
     if (response?.ok) return (await response.json()).data;
-    if (response && response.status < 500 && response.status !== 429) {
+    if (response && response.status < 500) {
       throw new Error(`Not retryable: HTTP ${response.status} ${await response.text()}`);
     }
     await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
@@ -83,22 +83,20 @@ async function createOrderWithRetry(order, idempotencyKey, maxAttempts = 4) {
 ```
 
 ```python Python
-import json, os, time, requests
+import os, time, requests
 
-# sign_request(): see the Signature Generation Guide
+# sign_body(): see the Signature Generation Guide
 def create_order_with_retry(order: dict, idempotency_key: str, max_attempts: int = 4) -> dict:
-    path = "/api/merchant/orders"
-    body = json.dumps(order, separators=(",", ":"))
+    # Sign once: every attempt sends the same body and the same key
+    body = {**order, "signature": sign_body(order, os.environ["C2C_SIGNING_SECRET"])}
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.post(
-                BASE_URL + path,
-                data=body.encode("utf-8"),
+                f"{BASE_URL}/api/merchant/orders",
+                json=body,
                 headers={
-                    "Authorization": f"Bearer {os.environ['C2C_API_KEY']}",
-                    "Content-Type": "application/json",
-                    "Idempotency-Key": idempotency_key,                                  # same key
-                    **sign_request(os.environ["C2C_SIGNING_SECRET"], "POST", path, body),  # fresh signature
+                    "C2C-API-Key": os.environ["C2C_API_KEY"],
+                    "Idempotency-Key": idempotency_key,   # same key on every attempt
                 },
                 timeout=15,
             )
@@ -107,7 +105,7 @@ def create_order_with_retry(order: dict, idempotency_key: str, max_attempts: int
 
         if response is not None and response.ok:
             return response.json()["data"]
-        if response is not None and response.status_code < 500 and response.status_code != 429:
+        if response is not None and response.status_code < 500:
             raise RuntimeError(f"Not retryable: HTTP {response.status_code} {response.text}")
         time.sleep(2 ** attempt)
     raise RuntimeError("Still failing; retry later with the same Idempotency-Key.")
@@ -124,7 +122,7 @@ def create_order_with_retry(order: dict, idempotency_key: str, max_attempts: int
   <Card title="Errors" icon="triangle-exclamation" href="/api-reference/errors">
     Which errors are retryable
   </Card>
-  <Card title="Rate limits" icon="gauge" href="/api-reference/rate-limits">
-    Back off on 429
+  <Card title="Signature Generation Guide" icon="signature" href="/api-reference/signature-guide#replay-protection">
+    How retries and replays are told apart
   </Card>
 </CardGroup>

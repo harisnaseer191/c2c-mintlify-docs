@@ -1,5 +1,7 @@
 # C2C Merchant API Docs
 
+**Live site:** https://c2-c-92f40af6.mintlify.site/api-reference/introduction
+
 Merchant-facing API documentation built with [Mintlify](https://mintlify.com). The structure mirrors the
 WayPay docs (Guides + API reference tabs, hand-written MDX endpoint pages) but documents only what the
 C2C merchant API actually supports.

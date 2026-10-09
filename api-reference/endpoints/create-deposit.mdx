@@ -10,7 +10,7 @@ Creates a **deposit**: your customer pays money into an account held by a C2C me
 
 C2C assigns an available member when the order is created and returns a `paymentPageUrl`. Redirect your customer to that hosted page. There they pick their wallet, see the account to pay, send the money from their wallet app, and enter the last digits of the transaction ID. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
 
-The order is **always accepted**. If no eligible member is available right now, it's created with status `Awaiting`, and a member is assigned when the customer picks a wallet on the payment page.
+The order is **always accepted**. If no eligible member is available right now, it's created with status `Awaiting`, and a member is assigned when the customer opens the payment page.
 
 | | |
 |---|---|
@@ -49,7 +49,7 @@ The order is **always accepted**. If no eligible member is available right now, 
 </ParamField>
 
 <ParamField body="walletType" type="string" required>
-  The wallet the customer intends to pay with. C2C uses it to assign a member with a matching account. The customer can still switch to another wallet that is enabled for you on the payment page.
+  The wallet the customer intends to pay with. C2C uses it to assign a member with a matching account, and the payment page opens directly on this wallet. The customer can still switch to another wallet that is enabled for you on the payment page.
 
   One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
 </ParamField>
@@ -202,7 +202,7 @@ data = response.json()["data"]
 {
   "data": {
     "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
-    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...&wallet=jazzcash",
     "status": "Queued",
     "orderReference": "ORD-20261008120620-3f6b",
     "expiresAt": "2026-10-08T12:21:20.605646Z",
@@ -216,7 +216,7 @@ data = response.json()["data"]
 {
   "data": {
     "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
-    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...&wallet=jazzcash",
     "status": "Awaiting",
     "orderReference": "ORD-20261008120620-3f6b",
     "expiresAt": "2026-10-08T12:21:20.605646Z",
@@ -283,7 +283,7 @@ See [Errors](/api-reference/errors) for the complete error model.
 ## What happens next
 
 1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes.
-2. If the order is `Awaiting`, a member is assigned when the customer picks a wallet. Until one is online the page shows "Finding an available agent…" and re-checks every 10 seconds.
+2. If the order is `Awaiting`, a member is assigned when the customer opens the payment page. Until one is online the page shows "Finding an available agent…" and re-checks every 10 seconds.
 3. The customer pays and submits the transaction digits. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
 4. The member confirms (`Completed`) or rejects (`Rejected`) the payment.
 5. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.

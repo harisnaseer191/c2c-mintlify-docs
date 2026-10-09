@@ -105,11 +105,11 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
 
     Store `orderId`. If the call times out, retry with the **same** `Idempotency-Key` and the same body. You will get the same order back, never a duplicate. You can also look the order up by its `merchantOrderRef`.
 
-    If no member is available right now, the order is still accepted with status `Awaiting`. Redirect the customer as usual: a member is assigned when they pick a wallet.
+    If no member is available right now, the order is still accepted with status `Awaiting`. Redirect the customer as usual: a member is assigned when they open the payment page.
   </Step>
 
   <Step title="Redirect the customer">
-    Send the customer to `paymentPageUrl` within **15 minutes**. They choose a wallet, pay the displayed account and enter the last digits of their transaction ID. See [Hosted payment page](/guides/hosted-payment-page).
+    Send the customer to `paymentPageUrl` within **15 minutes**. The page opens on the `walletType` you requested. They pay the displayed account and enter the last digits of their transaction ID. See [Hosted payment page](/guides/hosted-payment-page).
   </Step>
 
   <Step title="Get the outcome">

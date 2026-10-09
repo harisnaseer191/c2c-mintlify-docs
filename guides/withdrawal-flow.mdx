@@ -102,6 +102,7 @@ async function payOut(payout) {
     customerAccountNumber: payout.accountNumber,   // validated on your side
     merchantOrderRef: payout.id,
     customerReference: payout.customerId,
+    callbackUrl: 'https://merchant.example.com/webhooks/c2c',
   };
 
   const res = await fetch(`${BASE_URL}/api/merchant/orders`, {
@@ -132,6 +133,7 @@ def pay_out(payout) -> None:
         "customerAccountNumber": payout.account_number,
         "merchantOrderRef": payout.id,
         "customerReference": payout.customer_id,
+        "callbackUrl": "https://merchant.example.com/webhooks/c2c",
     }
     res = requests.post(
         f"{BASE_URL}/api/merchant/orders",

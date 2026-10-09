@@ -123,6 +123,7 @@ async function startDeposit(cart) {
     walletType: 'JazzCash',
     merchantOrderRef: cart.id,
     customerReference: cart.customerId,
+    callbackUrl: 'https://merchant.example.com/webhooks/c2c',
   };
   const res = await fetch(`${BASE_URL}/api/merchant/orders`, {
     method: 'POST',
@@ -162,6 +163,7 @@ def start_deposit(cart) -> str:
         "walletType": "JazzCash",
         "merchantOrderRef": cart.id,
         "customerReference": cart.customer_id,
+        "callbackUrl": "https://merchant.example.com/webhooks/c2c",
     }
     res = requests.post(
         f"{BASE_URL}/api/merchant/orders",

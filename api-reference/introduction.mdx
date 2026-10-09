@@ -48,7 +48,7 @@ All paths in this reference are relative to the base URL, for example `POST /api
     Check the available and frozen funds in your C2C merchant wallet.
   </Card>
   <Card title="Signed requests" icon="signature" href="/api-reference/signature-guide">
-    A WayPay-compatible MD5 signature proves each order request came from you and was not tampered with.
+    An MD5 signature proves each order request came from you and was not tampered with.
   </Card>
   <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
     Receive a signed callback when an order completes or fails.
@@ -62,7 +62,7 @@ All paths in this reference are relative to the base URL, for example `POST /api
 | [Query wallet balance](/api-reference/endpoints/query-balance) | `GET /api/merchant/orders/balance` | Not required |
 | [Create deposit order](/api-reference/endpoints/create-deposit) | `POST /api/merchant/orders` with `"orderType": "Deposit"` | **Always enforced** |
 | [Create withdrawal order](/api-reference/endpoints/create-withdrawal) | `POST /api/merchant/orders` with `"orderType": "Withdrawal"` | **Always enforced** |
-| [Query order status](/api-reference/endpoints/query-order-status) | `GET /api/merchant/orders/{id}/status` | Not required |
+| [Query order status](/api-reference/endpoints/query-order-status) | `GET /api/merchant/orders/{id}/status`, where `{id}` is the `orderId` or `orderReference` | Not required |
 | [Query order status by reference](/api-reference/endpoints/query-order-status#query-by-merchantorderref) | `GET /api/merchant/orders/status?merchantOrderRef={ref}` | Not required |
 
 The Merchant API doesn't apply request rate limits.

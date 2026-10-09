@@ -3,7 +3,7 @@
   "info": {
     "title": "C2C Merchant API",
     "version": "1.0.0",
-    "description": "Create deposit and withdrawal orders, query order status and wallet balance. Every request is authenticated with a merchant API key in the C2C-API-Key header (Authorization: Bearer is also accepted). Deposit and withdrawal requests also carry a WayPay-compatible MD5 'signature' field in the JSON body; order creation always enforces it. The Merchant API has no request rate limits. See the Signature Generation Guide.",
+    "description": "Create deposit and withdrawal orders, query order status and wallet balance. Every request is authenticated with a merchant API key in the C2C-API-Key header (Authorization: Bearer is also accepted). Deposit and withdrawal requests also carry an MD5 'signature' field in the JSON body; order creation always enforces it. The Merchant API has no request rate limits. See the Signature Generation Guide.",
     "contact": {
       "email": "support@c2cplatform.com"
     }
@@ -61,7 +61,8 @@
                     "walletType": "JazzCash",
                     "merchantOrderRef": "INV-10045",
                     "customerReference": "player_12345",
-                    "signature": "f2eb65603d36507621fdfd64aba78974"
+                    "callbackUrl": "https://merchant.example.com/webhooks/c2c",
+                    "signature": "56eff91b5ab0351471a2a8d457320230"
                   }
                 },
                 "withdrawal": {
@@ -74,7 +75,8 @@
                     "merchantOrderRef": "PAYOUT-20017",
                     "customerReference": "player_12345",
                     "customerAccountNumber": "03001234567",
-                    "signature": "5db94b5eaf95dba367d124c28cb019f0"
+                    "callbackUrl": "https://merchant.example.com/webhooks/c2c",
+                    "signature": "8dddc4abc8aa78744bb29624ac583434"
                   }
                 }
               }
@@ -184,17 +186,24 @@
         ],
         "operationId": "getOrderStatus",
         "summary": "Query order status",
-        "description": "Returns the status, lifecycle stage and milestone timestamps of one of the merchant's orders. Scoped to the merchant: works with any of the merchant's API keys, including after key rotation.",
+        "description": "Returns the status, lifecycle stage and milestone timestamps of one of the merchant's orders, looked up by either C2C identifier: the orderId or the orderReference. Scoped to the merchant: works with any of the merchant's API keys, including after key rotation.",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             },
-            "description": "orderId returned at creation."
+            "description": "The orderId (UUID) or the orderReference (ORD-...) returned at creation and in webhooks.",
+            "examples": {
+              "orderId": {
+                "value": "788fcae0-5214-403c-baa2-f318c0eb1b5b"
+              },
+              "orderReference": {
+                "value": "ORD-20261008120620-3f6b"
+              }
+            }
           }
         ],
         "responses": {
@@ -220,7 +229,7 @@
             "description": "API key missing, invalid or revoked. Empty body."
           },
           "404": {
-            "description": "No order with this id for this merchant.",
+            "description": "No order with this orderId or orderReference for this merchant.",
             "content": {
               "application/json": {
                 "schema": {
@@ -240,20 +249,31 @@
         "tags": [
           "Orders"
         ],
-        "operationId": "getOrderStatusByMerchantOrderRef",
-        "summary": "Query order status by merchant order reference",
-        "description": "Returns the latest order the merchant created with the given merchantOrderRef, with its lifecycle stage and milestone timestamps. Same authentication, signature and rate-limit rules as the other merchant GET endpoints; sign the path including the query string.",
+        "operationId": "getOrderStatusByReference",
+        "summary": "Query order status by reference",
+        "description": "Returns the latest order the merchant created with the given merchantOrderRef, or the order with the given C2C orderReference, with its lifecycle stage and milestone timestamps. Send exactly one of the two query parameters. Authenticated by the API key alone; no signature.",
         "parameters": [
           {
             "name": "merchantOrderRef",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
               "maxLength": 200
             },
-            "description": "The merchantOrderRef sent at order creation (URL-encoded).",
+            "description": "The merchantOrderRef sent at order creation (URL-encoded). Send this or orderReference.",
             "example": "INV-10045"
+          },
+          {
+            "name": "orderReference",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "C2C's orderReference (ORD-...). Send this or merchantOrderRef.",
+            "example": "ORD-20261008120620-3f6b"
           }
         ],
         "responses": {
@@ -276,14 +296,25 @@
             }
           },
           "400": {
-            "description": "merchantOrderRef missing or empty.",
+            "description": "Neither merchantOrderRef nor orderReference sent, or both sent.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 },
-                "example": {
-                  "error": "Provide an order id or a merchantOrderRef."
+                "examples": {
+                  "missing": {
+                    "summary": "No reference",
+                    "value": {
+                      "error": "Provide an orderId, an orderReference or a merchantOrderRef."
+                    }
+                  },
+                  "both": {
+                    "summary": "Both references",
+                    "value": {
+                      "error": "Provide either an orderReference or a merchantOrderRef, not both."
+                    }
+                  }
                 }
               },
               "application/problem+json": {
@@ -297,7 +328,7 @@
             "description": "API key missing, invalid or revoked. Empty body."
           },
           "404": {
-            "description": "No order with this merchantOrderRef for this merchant.",
+            "description": "No order with this merchantOrderRef or orderReference for this merchant.",
             "content": {
               "application/json": {
                 "schema": {

@@ -7,7 +7,7 @@ description: 'Sign deposit and withdrawal requests with an MD5 signature over th
 
 Your API key identifies you. The **request signature** proves that an order request was created by someone holding your signing secret and that its fields were not changed on the way. C2C verifies the signature **before** it validates the request or runs any business logic. A request with a missing, malformed or incorrect signature is rejected with `401`, and no order is created.
 
-The signature is a field named `signature` **inside the JSON request body**. It is the same scheme used by WayPay, so an existing WayPay signing implementation works unchanged.
+The signature is a field named `signature` **inside the JSON request body**.
 
 <Info>
   Your **signing secret** (`sksec_...`) is issued together with your API key and is shown **only once**. Each API key has its own signing secret. Sign a request with the secret that belongs to the API key in that request's `C2C-API-Key` header.
@@ -21,7 +21,7 @@ Signatures are required on requests that move money. Read-only requests are auth
 |----------|-----------|
 | [Create deposit order](/api-reference/endpoints/create-deposit) `POST /api/merchant/orders` | **Required.** Unsigned or incorrectly signed requests are always rejected. |
 | [Create withdrawal order](/api-reference/endpoints/create-withdrawal) `POST /api/merchant/orders` | **Required.** |
-| [Query order status](/api-reference/endpoints/query-order-status) `GET /api/merchant/orders/{id}/status` | Not used. API key only. |
+| [Query order status](/api-reference/endpoints/query-order-status) `GET /api/merchant/orders/{id}/status` or `GET /api/merchant/orders/status?merchantOrderRef={ref}` | Not used. API key only. |
 | [Query wallet balance](/api-reference/endpoints/query-balance) `GET /api/merchant/orders/balance` | Not used. API key only. |
 
 ## Quick reference
@@ -78,26 +78,28 @@ Request body (before signing):
   "walletType": "JazzCash",
   "merchantOrderRef": "INV-10045",
   "customerReference": "player_12345",
-  "callbackUrl": null                     ✗ skipped (null)
+  "callbackUrl": "https://merchant.example.com/webhooks/c2c",
+  "metadata": null                        ✗ skipped (null)
 }
 
 Signing secret: sksec_Q9mTz4Lk8XwR2bN6vH1cJ7pY3sF5gD0aE8uK2iOq   (example only)
 
 Steps 1–3 – keep the signed fields, lowercase the keys
   ordertype=Deposit, amount=1500, currency=PKR, wallettype=JazzCash,
-  merchantorderref=INV-10045, customerreference=player_12345
+  merchantorderref=INV-10045, customerreference=player_12345,
+  callbackurl=https://merchant.example.com/webhooks/c2c
 
 Steps 4–5 – sort by key and join
-  amount=1500&currency=PKR&customerreference=player_12345&merchantorderref=INV-10045&ordertype=Deposit&wallettype=JazzCash
+  amount=1500&callbackurl=https://merchant.example.com/webhooks/c2c&currency=PKR&customerreference=player_12345&merchantorderref=INV-10045&ordertype=Deposit&wallettype=JazzCash
 
 Step 6 – append the secret
-  amount=1500&currency=PKR&customerreference=player_12345&merchantorderref=INV-10045&ordertype=Deposit&wallettype=JazzCashsksec_Q9mTz4Lk8XwR2bN6vH1cJ7pY3sF5gD0aE8uK2iOq
+  amount=1500&callbackurl=https://merchant.example.com/webhooks/c2c&currency=PKR&customerreference=player_12345&merchantorderref=INV-10045&ordertype=Deposit&wallettype=JazzCashsksec_Q9mTz4Lk8XwR2bN6vH1cJ7pY3sF5gD0aE8uK2iOq
 
 Step 7 – MD5, lowercase hex
-  f2eb65603d36507621fdfd64aba78974
+  56eff91b5ab0351471a2a8d457320230
 
 Step 8 – body as sent
-  {"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345","signature":"f2eb65603d36507621fdfd64aba78974"}
+  {"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345","callbackUrl":"https://merchant.example.com/webhooks/c2c","signature":"56eff91b5ab0351471a2a8d457320230"}
 ```
 
 ## Value formatting rules
@@ -139,20 +141,20 @@ Use these inputs to check your implementation. All three use the example signing
 
 | Request | Body (without `signature`) | Expected `signature` |
 |---------|----------------------------|----------------------|
-| Deposit | `{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345"}` | `f2eb65603d36507621fdfd64aba78974` |
-| Withdrawal | `{"orderType":"Withdrawal","amount":2000,"currency":"PKR","walletType":"Easypaisa","merchantOrderRef":"PAYOUT-20017","customerReference":"player_12345","customerAccountNumber":"03001234567"}` | `5db94b5eaf95dba367d124c28cb019f0` |
+| Deposit | `{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345","callbackUrl":"https://merchant.example.com/webhooks/c2c"}` | `56eff91b5ab0351471a2a8d457320230` |
+| Withdrawal | `{"orderType":"Withdrawal","amount":2000,"currency":"PKR","walletType":"Easypaisa","merchantOrderRef":"PAYOUT-20017","customerReference":"player_12345","customerAccountNumber":"03001234567","callbackUrl":"https://merchant.example.com/webhooks/c2c"}` | `8dddc4abc8aa78744bb29624ac583434` |
 | Deposit with a decimal amount, a `null` and an integer option | `{"orderType":"Deposit","amount":1500.5,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10046","customerReference":"player_12345","callbackUrl":"https://merchant.example.com/webhooks/c2c","metadata":null,"txnRefDigitsRequired":6}` | `e07d0c722ae8f9085825390797fd0219` |
 
 The query strings for the second and third examples are:
 
 ```text
-amount=2000&currency=PKR&customeraccountnumber=03001234567&customerreference=player_12345&merchantorderref=PAYOUT-20017&ordertype=Withdrawal&wallettype=Easypaisa
+amount=2000&callbackurl=https://merchant.example.com/webhooks/c2c&currency=PKR&customeraccountnumber=03001234567&customerreference=player_12345&merchantorderref=PAYOUT-20017&ordertype=Withdrawal&wallettype=Easypaisa
 
 amount=1500.5&callbackurl=https://merchant.example.com/webhooks/c2c&currency=PKR&customerreference=player_12345&merchantorderref=INV-10046&ordertype=Deposit&txnrefdigitsrequired=6&wallettype=JazzCash
 ```
 
 <Note>
-  These worked examples are checked by C2C's automated test suite against the production verification code, and they match the signatures WayPay's signer produces for the same inputs.
+  These worked examples are checked by C2C's automated test suite against the production verification code.
 </Note>
 
 ## Code examples
@@ -210,6 +212,7 @@ var payload = new JsonObject
     ["walletType"] = "JazzCash",
     ["merchantOrderRef"] = "INV-10045",
     ["customerReference"] = "player_12345",
+    ["callbackUrl"] = "https://merchant.example.com/webhooks/c2c",
 };
 var body = C2CSigner.SignBody(payload, Environment.GetEnvironmentVariable("C2C_SIGNING_SECRET")!);
 
@@ -250,6 +253,7 @@ const payload = {
   walletType: 'JazzCash',
   merchantOrderRef: 'INV-10045',
   customerReference: 'player_12345',
+  callbackUrl: 'https://merchant.example.com/webhooks/c2c',
 };
 
 const response = await fetch(`${baseUrl}/api/merchant/orders`, {
@@ -293,6 +297,7 @@ payload = {
     "walletType": "JazzCash",
     "merchantOrderRef": "INV-10045",
     "customerReference": "player_12345",
+    "callbackUrl": "https://merchant.example.com/webhooks/c2c",
 }
 
 response = requests.post(
@@ -383,7 +388,7 @@ You don't need to re-sign a retry: the body and the `Idempotency-Key` stay exact
 
 <Steps>
   <Step title="Reproduce the worked example">
-    Run your signing code on the [worked examples](#worked-examples). The deposit must produce `f2eb65603d36507621fdfd64aba78974`.
+    Run your signing code on the [worked examples](#worked-examples). The deposit must produce `56eff91b5ab0351471a2a8d457320230`.
   </Step>
   <Step title="Print the query string">
     Log the string you hash, with the secret removed. Keys lowercase, sorted, `key=value` joined with `&`, no `signature`, no `null` or empty values.

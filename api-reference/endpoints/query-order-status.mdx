@@ -1,14 +1,20 @@
 ---
 title: "Query Order Status"
 api: "GET /api/merchant/orders/{id}/status"
-description: "Retrieve the current status, lifecycle stage and milestone timestamps of a deposit or withdrawal order, by its C2C order ID or your merchantOrderRef."
+description: "Retrieve the current status, lifecycle stage and milestone timestamps of a deposit or withdrawal order, by its C2C orderId or orderReference, or by your own merchantOrderRef."
 ---
 
 ## Overview
 
 Returns the current status, [lifecycle stage](/guides/order-status#lifecycle-stages) and milestone timestamps of one of **your merchant account's** orders. Use it to poll for the outcome, to reconcile after a missed webhook, or to confirm a webhook before you fulfil.
 
-Lookups are scoped to your merchant account, not to an API key: any of your active API keys can query any of your orders, including orders created before a key rotation. You can look an order up by its `orderId` (this endpoint) or by your `merchantOrderRef` ([see below](#query-by-merchantorderref)).
+Lookups are scoped to your merchant account, not to an API key: any of your active API keys can query any of your orders, including orders created before a key rotation. You can look an order up by any of its identifiers. All of them return the same response:
+
+| You have | Request |
+|----------|---------|
+| C2C's `orderId` | `GET /api/merchant/orders/{orderId}/status` |
+| C2C's `orderReference` (`ORD-…`) | `GET /api/merchant/orders/{orderReference}/status` |
+| Your own `merchantOrderRef` | `GET /api/merchant/orders/status?merchantOrderRef={merchantOrderRef}` ([see below](#query-by-merchantorderref)) |
 
 | | |
 |---|---|
@@ -23,12 +29,13 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
 
 ## Path parameters
 
-<ParamField path="id" type="uuid" required>
-  The `orderId` returned by [Create deposit](/api-reference/endpoints/create-deposit) or [Create withdrawal](/api-reference/endpoints/create-withdrawal), also present in webhooks.
+<ParamField path="id" type="string" required>
+  Either of C2C's identifiers for the order, both returned by [Create deposit](/api-reference/endpoints/create-deposit) or [Create withdrawal](/api-reference/endpoints/create-withdrawal) and present in webhooks:
 
-  <Note>
-    C2C's `orderReference` can't be used for lookups. To look an order up by your own reference, use [Query by `merchantOrderRef`](#query-by-merchantorderref).
-  </Note>
+  - the `orderId`, for example `788fcae0-5214-403c-baa2-f318c0eb1b5b`
+  - the `orderReference`, for example `ORD-20261008120620-3f6b`
+
+  To look an order up by your own reference, use [Query by `merchantOrderRef`](#query-by-merchantorderref).
 </ParamField>
 
 ## Response
@@ -89,33 +96,67 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
 </ResponseField>
 
 <RequestExample>
-```bash cURL
+```bash cURL (orderId)
 curl --request GET \
   --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/788fcae0-5214-403c-baa2-f318c0eb1b5b/status \
   --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
+```bash cURL (orderReference)
+curl --request GET \
+  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/ORD-20261008120620-3f6b/status \
+  --header "C2C-API-Key: $C2C_API_KEY"
+```
+
+```bash cURL (merchantOrderRef)
+curl --request GET \
+  --url "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/status?merchantOrderRef=INV-10045" \
+  --header "C2C-API-Key: $C2C_API_KEY"
+```
+
 ```javascript Node.js
-async function getOrderStatus(orderId) {
-  const response = await fetch(
-    `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/${orderId}/status`,
-    { headers: { 'C2C-API-Key': process.env.C2C_API_KEY } }
-  );
+const BASE_URL = 'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io';
+
+// Pass exactly one identifier: C2C's orderId or orderReference, or your merchantOrderRef.
+async function getOrderStatus({ orderId, orderReference, merchantOrderRef }) {
+  const path = merchantOrderRef
+    ? `/api/merchant/orders/status?merchantOrderRef=${encodeURIComponent(merchantOrderRef)}`
+    : `/api/merchant/orders/${encodeURIComponent(orderId ?? orderReference)}/status`;
+  const response = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'C2C-API-Key': process.env.C2C_API_KEY },
+  });
   if (!response.ok) throw new Error(`Status query failed: HTTP ${response.status}`);
   return (await response.json()).data;
 }
+
+await getOrderStatus({ orderId: '788fcae0-5214-403c-baa2-f318c0eb1b5b' });
+await getOrderStatus({ orderReference: 'ORD-20261008120620-3f6b' });
+await getOrderStatus({ merchantOrderRef: 'INV-10045' });
 ```
 
 ```python Python
-import os, requests
+import os
+from urllib.parse import quote
 
-def get_order_status(order_id: str) -> dict:
-    response = requests.get(
-        f"https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/{order_id}/status",
-        headers={"C2C-API-Key": os.environ["C2C_API_KEY"]},
-    )
+import requests
+
+BASE_URL = "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io"
+
+
+def get_order_status(*, order_id=None, order_reference=None, merchant_order_ref=None) -> dict:
+    """Pass exactly one identifier: C2C's order_id or order_reference, or your merchant_order_ref."""
+    if merchant_order_ref:
+        url, params = f"{BASE_URL}/api/merchant/orders/status", {"merchantOrderRef": merchant_order_ref}
+    else:
+        url, params = f"{BASE_URL}/api/merchant/orders/{quote(order_id or order_reference, safe='')}/status", None
+    response = requests.get(url, params=params, headers={"C2C-API-Key": os.environ["C2C_API_KEY"]})
     response.raise_for_status()
     return response.json()["data"]
+
+
+get_order_status(order_id="788fcae0-5214-403c-baa2-f318c0eb1b5b")
+get_order_status(order_reference="ORD-20261008120620-3f6b")
+get_order_status(merchant_order_ref="INV-10045")
 ```
 </RequestExample>
 
@@ -255,10 +296,11 @@ def get_order_status(order_id: str) -> dict:
 const FINAL = new Set(['Completed', 'Confirmed', 'Rejected', 'Expired', 'CancelledTimeout', 'Cancelled', 'CancelledAuto']);
 const SUCCESS = new Set(['Completed', 'Confirmed']);
 
-async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 * 1000 } = {}) {
+// lookup: { orderId }, { orderReference } or { merchantOrderRef }, as for getOrderStatus above
+async function waitForOutcome(lookup, { intervalMs = 5000, timeoutMs = 30 * 60 * 1000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const { status } = await getOrderStatus(orderId);
+    const { status } = await getOrderStatus(lookup);
     if (FINAL.has(status)) return { status, success: SUCCESS.has(status) };
     await new Promise((r) => setTimeout(r, intervalMs));
   }
@@ -271,7 +313,7 @@ async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 
 | Status | When | Body |
 |--------|------|------|
 | `401` | API key missing, invalid or revoked | Empty body |
-| `404` | No order with this ID for your merchant account | `{"error": "Order not found."}` |
+| `404` | No order with this `orderId` or `orderReference` for your merchant account | `{"error": "Order not found."}` |
 
 ## Query by `merchantOrderRef`
 
@@ -279,31 +321,37 @@ async function waitForOutcome(orderId, { intervalMs = 5000, timeoutMs = 30 * 60 
 GET /api/merchant/orders/status?merchantOrderRef={merchantOrderRef}
 ```
 
-Returns the **latest** order your merchant account created with this `merchantOrderRef`, in exactly the same response shape as above. Use it when you didn't get the `orderId` back, for example after a timeout. Authentication works the same as for the lookup by ID: API key only, no signature.
+Returns the **latest** order your merchant account created with this `merchantOrderRef`, in exactly the same response shape as above. Use it to track orders by your own reference, or when you didn't get the `orderId` back, for example after a timeout. Authentication works the same as for the lookup by ID: API key only, no signature.
 
-<ParamField query="merchantOrderRef" type="string" required>
+<ParamField query="merchantOrderRef" type="string">
   Your `merchantOrderRef` from order creation. URL-encode it.
 </ParamField>
 
+<ParamField query="orderReference" type="string">
+  C2C's `orderReference` (`ORD-…`). Accepted here too, as an alternative to the path form above.
+</ParamField>
+
+Send **one** of the two parameters.
+
+```bash cURL
+curl --request GET \
+  --url "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/status?merchantOrderRef=INV-10045" \
+  --header "C2C-API-Key: $C2C_API_KEY"
+```
+
 ```javascript Node.js
-async function getOrderStatusByRef(merchantOrderRef) {
-  const path = `/api/merchant/orders/status?merchantOrderRef=${encodeURIComponent(merchantOrderRef)}`;
-  const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'C2C-API-Key': process.env.C2C_API_KEY },
-  });
-  if (!response.ok) throw new Error(`Status query failed: HTTP ${response.status}`);
-  return (await response.json()).data;
-}
+const order = await getOrderStatus({ merchantOrderRef: 'INV-10045' });   // helper from the examples above
 ```
 
 | Status | When | Body |
 |--------|------|------|
-| `400` | `merchantOrderRef` missing or empty | `{"error": "Provide an order id or a merchantOrderRef."}` |
+| `400` | Neither parameter sent, or both empty | `{"error": "Provide an orderId, an orderReference or a merchantOrderRef."}` |
+| `400` | Both `merchantOrderRef` and `orderReference` sent | `{"error": "Provide either an orderReference or a merchantOrderRef, not both."}` |
 | `401` | API key missing, invalid or revoked | Empty body |
-| `404` | No order with this `merchantOrderRef` for your merchant account | `{"error": "Order not found."}` |
+| `404` | No order with this reference for your merchant account | `{"error": "Order not found."}` |
 
 <Note>
-  A reference can belong to several orders only when the earlier ones failed (see [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules)). This endpoint always returns the most recent one; use the `orderId` to query an older order.
+  A `merchantOrderRef` can belong to several orders only when the earlier ones failed (see [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules)). This endpoint always returns the most recent one; use the `orderId` or `orderReference` to query an older order.
 </Note>
 
 ## Next steps

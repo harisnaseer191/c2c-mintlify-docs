@@ -111,8 +111,9 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 
 | Status | Message | Cause |
 |--------|---------|-------|
-| `400` | `Provide an order id or a merchantOrderRef.` | Status query by reference without a `merchantOrderRef` value |
-| `404` | `Order not found.` | No order with this `orderId` or `merchantOrderRef` for your merchant account |
+| `400` | `Provide an orderId, an orderReference or a merchantOrderRef.` | Status query by reference without a `merchantOrderRef` or `orderReference` value |
+| `400` | `Provide either an orderReference or a merchantOrderRef, not both.` | Status query by reference with both parameters |
+| `404` | `Order not found.` | No order with this `orderId`, `orderReference` or `merchantOrderRef` for your merchant account |
 | `404` | `API key not found or inactive.` | Key revoked while the request was being processed |
 
 ## Recommended handling

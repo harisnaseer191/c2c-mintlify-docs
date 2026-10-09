@@ -139,7 +139,7 @@ curl --request POST \
   --header "C2C-API-Key: $C2C_API_KEY" \
   --header "Content-Type: application/json" \
   --header "Idempotency-Key: INV-10045" \
-  --data '{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345","signature":"f2eb65603d36507621fdfd64aba78974"}'
+  --data '{"orderType":"Deposit","amount":1500,"currency":"PKR","walletType":"JazzCash","merchantOrderRef":"INV-10045","customerReference":"player_12345","callbackUrl":"https://merchant.example.com/webhooks/c2c","signature":"56eff91b5ab0351471a2a8d457320230"}'
 ```
 
 ```javascript Node.js
@@ -151,6 +151,7 @@ const payload = {
   walletType: 'JazzCash',
   merchantOrderRef: 'INV-10045',
   customerReference: 'player_12345',
+  callbackUrl: 'https://merchant.example.com/webhooks/c2c',
 };
 
 const response = await fetch(
@@ -180,6 +181,7 @@ payload = {
     "walletType": "JazzCash",
     "merchantOrderRef": "INV-10045",
     "customerReference": "player_12345",
+    "callbackUrl": "https://merchant.example.com/webhooks/c2c",
 }
 
 response = requests.post(

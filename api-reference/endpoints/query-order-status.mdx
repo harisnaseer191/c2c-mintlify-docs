@@ -262,7 +262,7 @@ get_order_status(merchant_order_ref="INV-10045")
 
 | Status | Applies to | Meaning | Final? |
 |--------|-----------|---------|--------|
-| `Awaiting` | Both | Accepted, waiting for an eligible member. Deposit: a member is assigned when the customer picks a wallet; if none is assigned before the checkout link expires (15 minutes), it ends `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available, or `CancelledTimeout` after 120 minutes. | No |
+| `Awaiting` | Both | Accepted, waiting for an eligible member. Deposit: a member is assigned when the customer opens the payment page; if none is assigned before the checkout link expires (15 minutes), it ends `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available, or `CancelledTimeout` after 120 minutes. | No |
 | `Queued` | Deposit | Created with a member assigned. The customer hasn't chosen a wallet on the payment page yet. | No |
 | `AwaitingCustomerPayment` | Deposit | Wallet chosen and account shown. Waiting for the customer to pay and submit the transaction digits. | No |
 | `AwaitingMemberConfirmation` | Deposit | Customer submitted payment. Waiting for the member to verify receipt. | No |

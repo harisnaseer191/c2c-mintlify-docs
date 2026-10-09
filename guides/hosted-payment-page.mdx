@@ -14,13 +14,14 @@ Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **ho
 ## The payment page URL
 
 ```text
-https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signature=Xk3...
+https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signature=Xk3...&wallet=jazzcash
 ```
 
 | Property | Detail |
 |----------|--------|
 | Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
 | Lifetime | **15 minutes** from order creation (`expiresAt` in the response) |
+| Wallet | `wallet` is the `walletType` you requested (`jazzcash`, `easypaisa`, `tillid` or `bank`). The page opens directly on that wallet. It isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
 | Withdrawals | A URL is also returned for withdrawals, but customers don't need to visit it |
 
@@ -31,8 +32,8 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 ## What your customer sees
 
 <Steps>
-  <Step title="Choose a wallet">
-    The page shows your merchant name, the amount and the C2C order reference. The customer picks a wallet from those enabled for your account (for example JazzCash or Easypaisa). C2C then reserves the receiving account, and the order moves to `AwaitingCustomerPayment`.
+  <Step title="Open on your wallet">
+    The page shows your merchant name, the amount and the C2C order reference, and opens directly on the `walletType` you requested (for example JazzCash). The customer doesn't pick a wallet first. C2C reserves the receiving account, and the order moves to `AwaitingCustomerPayment`. If other wallets are enabled for your account, the customer can tap **Change** to pay with one of those instead.
 
     If the order is `Awaiting`, an online member is assigned at this point. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until an account can be shown or the link expires. The customer must not send money until an account is shown.
   </Step>
@@ -48,7 +49,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 </Steps>
 
 <Note>
-  If the assigned member goes offline before the customer chooses a wallet, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different wallet type than you requested, your fee is re-quoted for that wallet.
+  If the assigned member goes offline before the customer opens the page, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different wallet type than you requested, your fee is re-quoted for that wallet.
 </Note>
 
 ## Returning the customer to your site

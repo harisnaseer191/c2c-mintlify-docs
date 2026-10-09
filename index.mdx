@@ -62,7 +62,7 @@ flowchart LR
 |---|---|
 | **Style** | REST, JSON, HTTPS |
 | **Authentication** | `C2C-API-Key: mk_live_...` header (`Authorization: Bearer` also accepted) |
-| **Request signing** | MD5 `signature` field in the body (WayPay-compatible). Always enforced for deposits and withdrawals. |
+| **Request signing** | MD5 `signature` field in the body. Always enforced for deposits and withdrawals. |
 | **Idempotency** | `Idempotency-Key` header required on order creation |
 | **Wallets** | JazzCash, Easypaisa, Till ID, bank account (enabled per merchant) |
 | **Currencies** | PKR (default), INR, BDT |

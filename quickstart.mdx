@@ -138,6 +138,7 @@ await c2c('POST', '/api/merchant/orders', {
   walletType: 'Easypaisa',
   customerAccountNumber: '03001234567',
   merchantOrderRef: 'PAYOUT-20017',
+  callbackUrl: 'https://merchant.example.com/webhooks/c2c',
 }, { 'Idempotency-Key': 'PAYOUT-20017' });
 ```
 

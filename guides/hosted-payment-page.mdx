@@ -88,6 +88,7 @@ app.post('/checkout/c2c', async (req, res) => {
     walletType: req.body.walletType ?? 'JazzCash',
     merchantOrderRef: cart.id,
     customerReference: req.user.id,
+    callbackUrl: 'https://merchant.example.com/webhooks/c2c',
   }, idempotencyKey);
 
   await saveC2COrderId(cart.id, order.orderId);           // needed for status checks

@@ -2,9 +2,8 @@
 
 **Live site:** https://c2-c-92f40af6.mintlify.site/api-reference/introduction
 
-Merchant-facing API documentation built with [Mintlify](https://mintlify.com). The structure mirrors the
-WayPay docs (Guides + API reference tabs, hand-written MDX endpoint pages) but documents only what the
-C2C merchant API actually supports.
+Merchant-facing API documentation built with [Mintlify](https://mintlify.com): Guides + API reference tabs with
+hand-written MDX endpoint pages, documenting only what the C2C merchant API actually supports.
 
 ## Local development
 
@@ -28,8 +27,8 @@ mint broken-links
 - Endpoint pages under `api-reference/endpoints/` describe `MerchantOrdersController`
   (`src/C2C.API/Controllers/MerchantOrdersController.cs`). Update them with any change to its request/response
   contracts, validators (`CreateMerchantOrderCommandValidator`) or error messages.
-- Request signing follows WayPay's scheme (MD5 `signature` field in the body). The worked examples in
-  `api-reference/signature-guide.mdx` are pinned by
+- Request signing uses an MD5 `signature` field in the body. The worked examples in
+  `api-reference/signature-guide.mdx` (reused by the endpoint pages' request examples) are pinned by
   `MerchantRequestSignatureTests.WhenUsingDocumentedWorkedExample_Compute_MatchesPublishedSignature`. If you change
   them, update the test (and vice versa).
 - `openapi.json` is the published, hand-maintained merchant spec. The API also generates its own spec at

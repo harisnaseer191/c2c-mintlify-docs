@@ -38,7 +38,7 @@
         ],
         "operationId": "createOrder",
         "summary": "Create a deposit or withdrawal order",
-        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key \u2192 401 SIGNATURE_REPLAYED.",
+        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key → 401 SIGNATURE_REPLAYED.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -472,7 +472,7 @@
           "Completed",
           "Failed"
         ],
-        "description": "Canonical lifecycle stage: Awaiting \u2192 Assigned \u2192 Sent \u2192 Approved / Rejected \u2192 Completed / Failed. Approved/Rejected currently happen in the same step as Completed/Failed, so the current stage is normally one of the other five."
+        "description": "Canonical lifecycle stage: Awaiting → Assigned → Sent → Approved / Rejected → Completed / Failed. Approved/Rejected currently happen in the same step as Completed/Failed, so the current stage is normally one of the other five."
       },
       "OrderLifecycle": {
         "type": "object",
@@ -592,7 +592,15 @@
               "null"
             ],
             "maxLength": 50,
-            "description": "Required when orderType is Withdrawal; ignored for deposits."
+            "description": "Withdrawals: the customer's receiving account. Optional — when omitted the order is accepted as Awaiting and the customer enters their account on the hosted page (paymentPageUrl) before a member is assigned. Ignored for deposits."
+          },
+          "customerAccountName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "Withdrawals: the name the customer's account is held in, shown to the member who pays it. Only accepted together with customerAccountNumber."
           },
           "callbackUrl": {
             "type": [
@@ -665,7 +673,7 @@
           "paymentPageUrl": {
             "type": "string",
             "format": "uri",
-            "description": "Hosted payment page (deposits). Pre-signed; expires at expiresAt."
+            "description": "Hosted page for the order. Deposits: the customer pays there. Withdrawals: the customer enters their receiving account there when the order was created without one, and can follow the payout. Pre-signed; expires at expiresAt."
           },
           "status": {
             "$ref": "#/components/schemas/OrderStatus"

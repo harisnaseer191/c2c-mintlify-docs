@@ -262,12 +262,12 @@ get_order_status(merchant_order_ref="INV-10045")
 
 | Status | Applies to | Meaning | Final? |
 |--------|-----------|---------|--------|
-| `Awaiting` | Both | Accepted, waiting for an eligible member. Deposit: a member is assigned when the customer opens the payment page; if none is assigned before the checkout link expires (15 minutes), it ends `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available, or `CancelledTimeout` after 120 minutes. | No |
+| `Awaiting` | Both | Accepted, waiting for an eligible member. Deposit: a member is assigned when the customer opens the payment page; if none is assigned before the checkout link expires (15 minutes), it ends `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available, or `CancelledTimeout` after 120 minutes. A withdrawal created without `customerAccountNumber` first waits here for the customer to enter their account on the hosted page (`CancelledTimeout` if they haven't within 15 minutes). | No |
 | `Queued` | Deposit | Created with a member assigned. The customer hasn't chosen a wallet on the payment page yet. | No |
 | `AwaitingCustomerPayment` | Deposit | Wallet chosen and account shown. Waiting for the customer to pay and submit the transaction digits. | No |
 | `AwaitingMemberConfirmation` | Deposit | Customer submitted payment. Waiting for the member to verify receipt. | No |
 | `AwaitingMemberPayout` | Withdrawal | Waiting for the member to send the payout. | No |
-| `ManualReview` | Both | Escalated to C2C operations, for example a member confirmation or payout window passed. Resolved by C2C to `Completed` or `Cancelled`, which sends `order.completed` or `order.failed`. Stage `Sent` if the customer had already paid, otherwise `Assigned`. | No |
+| `ManualReview` | Both | Escalated to C2C operations, for example a member confirmation or payout window passed, or the member reported that a payout could not be completed normally. Resolved by C2C to `Completed` or `Cancelled`, which sends `order.completed` or `order.failed`. Stage `Sent` if the customer had already paid, otherwise `Assigned`. | No |
 | `Completed` | Both | **Success.** Funds received (deposit) or paid out (withdrawal). | **Yes, success** |
 | `Rejected` | Both | The member rejected the order, for example because no matching payment was received. | **Yes, failed** |
 | `Expired` | Deposit | The checkout link (15 minutes) expired before the customer paid, including when they never opened it. | **Yes, failed** |

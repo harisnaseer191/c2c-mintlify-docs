@@ -56,7 +56,7 @@ With today's processing, approval and rejection happen in the same step as compl
   <Tab title="In progress">
     | Status | Order type | Waiting for |
     |--------|-----------|-------------|
-    | `Awaiting` | Both | An eligible member. Deposit: assigned when the customer opens the payment page. Withdrawal: assigned automatically as soon as a member is available. |
+    | `Awaiting` | Both | An eligible member. Deposit: assigned when the customer opens the payment page. Withdrawal: assigned automatically as soon as a member is available — or, when you created it without `customerAccountNumber`, waiting first for the customer to enter their account on the hosted page. |
     | `Queued` | Deposit | Customer to open the payment page |
     | `AwaitingCustomerPayment` | Deposit | Customer to pay and submit the transaction digits |
     | `AwaitingMemberConfirmation` | Deposit | Member to verify the payment |

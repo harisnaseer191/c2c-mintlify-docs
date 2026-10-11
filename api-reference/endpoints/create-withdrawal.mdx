@@ -54,7 +54,7 @@ You can give the customer's receiving account in two ways:
 </ParamField>
 
 <ParamField body="walletType" type="string" required>
-  The type of the customer's receiving account. C2C assigns a member who can pay out to it; the member may send the money from an account with a different provider. The wallet type is fixed by the order: on the hosted page the customer enters an account of this type and cannot choose another.
+  The type of the customer's receiving account. C2C assigns a member who can pay out to it: a payout is sent within one provider, so a JazzCash customer is paid by a member with a JazzCash account and an Easypaisa customer by a member with an Easypaisa account. The wallet type is fixed by the order: on the hosted page the customer enters an account of this type and cannot choose another.
 
   One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
 </ParamField>

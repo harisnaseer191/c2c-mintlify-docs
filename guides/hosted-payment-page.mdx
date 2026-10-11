@@ -38,7 +38,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
     If the order is `Awaiting`, an online member is assigned at this point. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until an account can be shown or the link expires. The customer must not send money until an account is shown.
   </Step>
   <Step title="Pay">
-    The page shows the receiving **account number** and **account holder name**. The customer sends exactly the order amount from their own wallet app.
+    The page shows the receiving account and its **account holder name**. The account is always with the wallet the customer is paying from — a JazzCash customer is shown a JazzCash account, an Easypaisa customer an Easypaisa account — and is either an **account number** or a **Till ID**; the page labels which. The customer sends exactly the order amount from their own wallet app.
   </Step>
   <Step title="Confirm the transfer">
     The customer enters the **last digits of the transaction ID** from their wallet app. The order's `txnRefDigitsRequired` sets how many digits (4 by default). They can also attach a **screenshot of the payment** (optional; JPEG, PNG or WebP up to 5 MB), which the member sees when verifying. The order moves to `AwaitingMemberConfirmation`.

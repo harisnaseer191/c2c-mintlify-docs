@@ -342,11 +342,12 @@ transaction ID (at most 20 characters). The app sends it only when the member ty
 }
 ```
 
-- `sourcePaymentAccountId` — the id of one of **your own** wallet accounts with `canFundWithdrawals: true` (from
-  `GET /api/member/payment-accounts`). Any provider may pay any customer wallet — e.g. paying an Easypaisa
-  customer from your JazzCash account — unless that route is configured as unsupported (then 400 with a message
-  naming the route). An account you switched off for receiving deposits can still be used; a pending, rejected,
-  admin-deactivated or on-hold one cannot.
+- `sourcePaymentAccountId` — the id of one of **your own** wallet accounts this withdrawal can be paid from. Take
+  the list from [`GET /api/member/orders/{id}/payout-source-accounts`](#list-payout-source-accounts): the accounts
+  that are approved, not on hold, and **with the customer's provider**. A payout is sent within one provider — a
+  JazzCash customer from a JazzCash account (account number or Till ID), an Easypaisa customer from an Easypaisa
+  account (account number or Till ID); another provider is refused with 400. An account you switched off for
+  receiving deposits can still be used; a pending, rejected, admin-deactivated or on-hold one cannot.
 - `memberTxnRefNo` — **exactly the last 4 digits** (0–9) of the outgoing transaction ID (TID). It is kept for
   reconciliation; it is not proof of payment.
 
@@ -367,11 +368,36 @@ completed order without settling it twice.
   - `The selected source account is not one of your wallet accounts.`
   - `The selected source account is on hold by the administrator. Choose another account or contact support.`
   - `The selected source account is not approved for payments. Choose one of your approved accounts.`
-  - `A JazzCash Account Number account cannot send to a Easypaisa wallet. Choose another of your accounts.` (only when that route is configured as unsupported)
+  - `Your JazzCash Account Number account cannot send to a Easypaisa wallet. Choose one of your Easypaisa accounts.` (the source is with another provider than the customer's wallet)
 
 **Response 409** — The order was updated concurrently; reload and try again  
 **Response 403** — Order belongs to a different member  
 **Response 404** — Order not found
+
+---
+
+### List Payout Source Accounts
+
+```
+GET /api/member/orders/{id}/payout-source-accounts
+Authorization: Bearer <accessToken>
+```
+
+The member's own accounts a withdrawal assigned to them can be paid from — fill the "paid from" list with it and
+offer it as it comes. An account is listed when it is approved, not on hold, not removed, and with the customer's
+provider:
+
+| Customer's wallet (`customerWalletType`) | Accounts listed |
+|---|---|
+| `JazzCash` | Your JazzCash accounts — account number or Till ID |
+| `Easypaisa`, `TillID` | Your Easypaisa accounts — account number or Till ID |
+
+**Response 200** — `data` is an array of [PaymentAccount](#the-paymentaccount-object) (possibly empty: the member
+then has no account that can pay this order and should add one or reject the order).
+
+**Response 403** — The order is assigned to another member  
+**Response 404** — Order not found  
+**Response 409** — The order is a deposit
 
 ---
 
@@ -511,11 +537,21 @@ on the next connection.
 ### Who gets an order
 
 A member is eligible when they are **online** (`isOnline`, set through `PATCH /api/member/availability`), have **Collections enabled**, have
-an **Approved + active** payment account for the order's wallet type, the order currency matches theirs,
-the amount is within their pay limit (deposits) / draw limit (withdrawals), they have a free slot under
-their concurrent-order limit, and — for deposits — their **available wallet balance covers the amount**.
-Among eligible members the least-loaded one is chosen, then the one who waited longest since their last
-order (fair rotation).
+a wallet account for the order (below), the order currency matches theirs, the amount is within their pay limit
+(deposits) / draw limit (withdrawals), they have a free slot under their concurrent-order limit, and — for
+deposits — their **available wallet balance covers the amount**. Among eligible members the least-loaded one is
+chosen, then the one who waited longest since their last order (fair rotation).
+
+**Transfer routes — money only moves within one provider.**
+
+| Order | Customer's wallet | Member account needed |
+|---|---|---|
+| Deposit | JazzCash | A JazzCash account — account number or Till ID — that is approved, **switched on** and not on hold (`canReceiveDeposits`) |
+| Deposit | Easypaisa | An Easypaisa account — account number or Till ID — with `canReceiveDeposits` |
+| Withdrawal | JazzCash | A JazzCash account — account number or Till ID — that is approved and not on hold (`canFundWithdrawals`; the receive-deposits switch does not matter) |
+| Withdrawal | Easypaisa | An Easypaisa account — account number or Till ID — with `canFundWithdrawals` |
+
+A member with only JazzCash accounts is never given an Easypaisa order, and the other way round.
 
 Withdrawals the member does not pay out in time are reassigned to another member (the previous member
 receives `OrderReassigned`, the new one `OrderAssigned`).
@@ -742,7 +778,7 @@ Approval does not switch the account on: it is `SwitchedOff` until the member tu
 | `isActive` | The member's own receive-deposits switch (meaningful once `status` is `Approved`) |
 | `effectiveStatus` | **Backend-computed** state to display: [`PaymentAccountEffectiveStatus`](#paymentaccounteffectivestatus) |
 | `canReceiveDeposits` | Whether deposits can be assigned to it right now |
-| `canFundWithdrawals` | Whether it can be chosen as the source account when confirming a withdrawal |
+| `canFundWithdrawals` | Whether it can pay out withdrawals at all (approved, not on hold). Which withdrawals it can pay depends on the customer's provider — see [List Payout Source Accounts](#list-payout-source-accounts) |
 | `isOnHold` / `holdMessage` | An admin placed the account on hold; `holdMessage` is the fixed member-safe text to show verbatim (`null` when not held). The admin's internal reason is never sent to the member app |
 | `rejectionReason` / `deactivationReason` | The admin's reason, for the member to read |
 

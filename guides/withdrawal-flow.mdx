@@ -12,7 +12,7 @@ You choose where the customer's receiving account comes from:
 - **You supply it** (`customerAccountNumber`) when you create the order. The customer doesn't need to visit any page.
 - **The customer supplies it.** Create the order without `customerAccountNumber` and redirect the customer to the returned `paymentPageUrl`: the [hosted page](/guides/hosted-payment-page#withdrawals) collects their wallet account number and account holder name, then shows the payout's progress.
 
-The member who pays the customer may send the money from an account with a different provider than the customer's wallet (for example from JazzCash to an Easypaisa wallet). This is handled by C2C and doesn't change anything in your integration.
+A payout is always sent within one provider: a JazzCash customer is paid from a member's JazzCash account, an Easypaisa customer from a member's Easypaisa account. C2C therefore assigns the withdrawal only to a member who has an approved account with the customer's provider. This is handled by C2C and doesn't change anything in your integration, but it is why `walletType` must be the wallet the customer really holds.
 
 ## Flow diagram
 
@@ -55,7 +55,7 @@ C2C runs the same checks as for deposits: API key, signature, validation, active
 
 If you didn't send `customerAccountNumber`, the order is accepted as `Awaiting` and waits for the customer: redirect them to `paymentPageUrl` (valid for 15 minutes). The steps below continue once they have submitted their account. If they don't, the order ends `CancelledTimeout`.
 
-C2C then looks for an available member who can pay out to the customer's wallet and whose limit covers the amount:
+C2C then looks for an available member who has an approved account with the customer's provider (JazzCash for a JazzCash wallet, Easypaisa for an Easypaisa wallet) and whose limit covers the amount:
 
 - **Member found:** the order starts in `AwaitingMemberPayout` (stage `Assigned`).
 - **No member right now:** the order is still **accepted** as `Awaiting` (stage `Awaiting`). It's assigned automatically as soon as a member becomes available: a member comes online, a member frees capacity, or C2C's once-a-minute background check finds one. While `Awaiting`, its **amount + fee stays reserved** against your balance (it counts as in progress for the funding check and for the Pending amount on your dashboard). If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout`.

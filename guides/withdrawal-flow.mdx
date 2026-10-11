@@ -34,7 +34,7 @@ sequenceDiagram
 
 ### 1. Check your balance
 
-Call [Query wallet balance](/api-reference/endpoints/query-balance). C2C accepts a withdrawal only if your available balance covers its **amount + fee** plus every withdrawal still in progress; otherwise it returns `422 Insufficient merchant balance`. The debit itself happens when the payout is **confirmed**. See the [funding check](/api-reference/endpoints/create-withdrawal#funding-check).
+Call [Query wallet balance](/api-reference/endpoints/query-balance). C2C accepts a withdrawal only if your available balance covers its **amount + fee**; otherwise it returns `422 Insufficient merchant balance`. Withdrawals already in progress are reserved and no longer count as available. The reserve is released when the order finishes: the debit happens when the payout is **confirmed**, and a payout that fails returns its amount + fee to your available balance. See the [funding check](/api-reference/endpoints/create-withdrawal#funding-check).
 
 ### 2. Create the order
 

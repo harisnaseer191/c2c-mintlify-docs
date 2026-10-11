@@ -164,7 +164,7 @@
             }
           },
           "422": {
-            "description": "Withdrawal not covered by the merchant balance (amount + fee + withdrawals in progress, including Awaiting), wallet channel disabled, or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
+            "description": "Withdrawal's amount + fee not covered by the merchant's available balance (which excludes withdrawals in progress, including Awaiting), wallet channel disabled, or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
             "content": {
               "application/json": {
                 "schema": {
@@ -761,15 +761,22 @@
         "type": "object",
         "required": [
           "availableBalance",
+          "reservedBalance",
           "frozenBalance",
           "currency"
         ],
         "properties": {
           "availableBalance": {
-            "type": "number"
+            "type": "number",
+            "description": "Funds usable now. Withdrawals in progress are already taken out."
+          },
+          "reservedBalance": {
+            "type": "number",
+            "description": "Amount + fee of the withdrawals still in progress."
           },
           "frozenBalance": {
-            "type": "number"
+            "type": "number",
+            "description": "Funds held for settlement requests."
           },
           "currency": {
             "$ref": "#/components/schemas/Currency"

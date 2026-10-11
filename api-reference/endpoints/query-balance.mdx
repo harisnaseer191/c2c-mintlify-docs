@@ -36,10 +36,13 @@ Orders still in progress don't affect the balance until they complete.
 <ResponseField name="data" type="object">
   <Expandable title="properties" defaultOpen>
     <ResponseField name="availableBalance" type="number">
-      Funds available to cover withdrawals and fees.
+      Funds you can use now for new withdrawals (amount + fee) and settlements. Withdrawals in progress are already taken out.
+    </ResponseField>
+    <ResponseField name="reservedBalance" type="number">
+      Amount + fee of your withdrawals still in progress. Each is debited when its payout is confirmed, or returns to `availableBalance` if it fails.
     </ResponseField>
     <ResponseField name="frozenBalance" type="number">
-      Funds held by C2C that you can't currently use.
+      Funds held for your settlement requests.
     </ResponseField>
     <ResponseField name="currency" type="string">
       Wallet currency. Merchant wallets are held in `PKR`.
@@ -80,6 +83,7 @@ print(f"Available: {data['availableBalance']} {data['currency']}")
 {
   "data": {
     "availableBalance": 48530.0000,
+    "reservedBalance": 1010.0000,
     "frozenBalance": 0.0,
     "currency": "PKR"
   }
@@ -102,6 +106,6 @@ Content-Length: 0
 
 ## Usage tips
 
-- Check `availableBalance` before submitting [withdrawals](/api-reference/endpoints/create-withdrawal). A new withdrawal is accepted only if `availableBalance` covers its **amount + fee** plus the withdrawals still in progress; otherwise it's rejected with `422 Insufficient merchant balance`.
+- Check `availableBalance` before submitting [withdrawals](/api-reference/endpoints/create-withdrawal). A new withdrawal is accepted only if `availableBalance` covers its **amount + fee**; otherwise it's rejected with `422 Insufficient merchant balance`. You don't need to subtract withdrawals in progress yourself: they are in `reservedBalance`, not in `availableBalance`.
 - Fees come from fee rules C2C configures for your account, per order type and wallet. The fee for an order is applied when it completes.
 - For a per-transaction history, use the **Merchant Portal** (Transactions). The API exposes only the current balance.

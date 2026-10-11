@@ -248,7 +248,7 @@ order_id = response.json()["data"]["orderId"]
 
 ```json 422 Insufficient balance
 {
-  "error": "Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required for this withdrawal and withdrawals in progress (including fees)."
+  "error": "Insufficient merchant balance: 510.00 PKR available, 1010.00 PKR required for this withdrawal (amount + fee). 1990.00 PKR is reserved for withdrawals in progress."
 }
 ```
 
@@ -276,22 +276,32 @@ order_id = response.json()["data"]["orderId"]
 | `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
 | `413` | Body larger than 64 KB | `{"code": "PAYLOAD_TOO_LARGE", ...}` |
 | `409` | `merchantOrderRef` is already used by a payout that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
-| `422` | Your available balance can't cover this payout plus fee and the withdrawals already in progress | `{"error": "Insufficient merchant balance: ..."}` |
+| `422` | Your available balance can't cover this payout plus its fee | `{"error": "Insufficient merchant balance: ..."}` |
 | `422` | The wallet channel is disabled for withdrawals on your account | `{"error": "..."}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 
 ## Funding check
 
-A withdrawal is accepted only if your **available balance** covers:
+A withdrawal is accepted only if your **available balance** covers this payout's **amount + its fee**.
+
+From the moment a withdrawal is accepted until it is confirmed or fails, its amount + fee is **reserved**: it is taken out of `availableBalance` and reported as `reservedBalance` by [Query wallet balance](/api-reference/endpoints/query-balance), so one balance cannot fund two payouts.
 
 ```text
-this payout's amount + its fee
-+ amount + fee of every withdrawal still in progress (Awaiting, AwaitingMemberPayout, ManualReview)
+availableBalance = wallet balance − reservedBalance
+reservedBalance  = amount + fee of every withdrawal that has not yet completed or failed
 ```
 
-Otherwise the request fails with `422 Insufficient merchant balance: …`, and no order is created. Top up your wallet, or wait for in-progress payouts to finish, then retry. You can reuse the same `Idempotency-Key`, because rejected requests don't consume it.
+The reserve of a withdrawal is released the moment the order finishes:
 
-Fees come from the fee rules C2C configures for your account. The fee is **fixed when the order is accepted**; later fee-rule changes apply to new orders only. The **amount + fee** is debited when the member confirms the payout. Check balances with [Query wallet balance](/api-reference/endpoints/query-balance).
+| The withdrawal… | Its reserved amount + fee… |
+|-----------------|----------------------------|
+| is accepted (`Awaiting`, `AwaitingMemberPayout`) or under review (`ManualReview`) | stays in `reservedBalance` |
+| completes (`Completed`) | is **debited** from your wallet: it leaves `reservedBalance` and `availableBalance` does not change |
+| fails (`Rejected`, `Cancelled`, `CancelledTimeout`, `Expired`) | is **returned**: it leaves `reservedBalance` and goes back to `availableBalance` |
+
+Otherwise the request fails with `422 Insufficient merchant balance: …`, and no order is created. When other withdrawals are in progress the message also says how much they reserve. Top up your wallet, or wait for in-progress payouts to finish, then retry. You can reuse the same `Idempotency-Key`, because rejected requests don't consume it.
+
+Fees come from the fee rules C2C configures for your account. The fee is **fixed when the order is accepted**; later fee-rule changes apply to new orders only. The **amount + fee** is debited when the member confirms the payout, and returns to your available balance if the payout fails. Check balances with [Query wallet balance](/api-reference/endpoints/query-balance).
 
 ## Awaiting withdrawals
 

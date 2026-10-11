@@ -66,7 +66,7 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
     ```javascript
     const { c2c } = require('./c2c');
     console.log(await c2c('GET', '/api/merchant/orders/balance'));
-    // { status: 200, body: { data: { availableBalance: 0.0, frozenBalance: 0.0, currency: 'PKR' } } }
+    // { status: 200, body: { data: { availableBalance: 0.0, reservedBalance: 0.0, frozenBalance: 0.0, currency: 'PKR' } } }
     ```
 
     A `401` here means the API key is wrong. Check your signing code separately against the [worked examples](/api-reference/signature-guide#worked-examples): on order creation, a `401` with a `code` means the signature is wrong. See [troubleshooting](/api-reference/signature-guide#common-mistakes-and-troubleshooting).
@@ -142,7 +142,7 @@ await c2c('POST', '/api/merchant/orders', {
 }, { 'Idempotency-Key': 'PAYOUT-20017' });
 ```
 
-Keep your merchant wallet funded. A withdrawal is accepted only if your available balance covers its **amount + fee** plus the withdrawals still in progress, otherwise `422 Insufficient merchant balance`. The debit happens when the member confirms the payout. If no member is available, the withdrawal is accepted as `Awaiting` and assigned automatically once one is; its amount + fee stays reserved meanwhile. See the [Withdrawal flow](/guides/withdrawal-flow).
+Keep your merchant wallet funded. A withdrawal is accepted only if your available balance covers its **amount + fee**, otherwise `422 Insufficient merchant balance`. Once accepted, its amount + fee is reserved (taken out of your available balance) until the member confirms the payout, when it is debited. If no member is available, the withdrawal is accepted as `Awaiting` and assigned automatically once one is; its amount + fee stays reserved meanwhile. See the [Withdrawal flow](/guides/withdrawal-flow).
 
 ## Go-live checklist
 

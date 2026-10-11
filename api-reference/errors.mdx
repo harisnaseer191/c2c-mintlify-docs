@@ -98,7 +98,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `400` | Problem details, `errors.$.walletType` | Unknown `orderType` / `walletType` value |
 | `403` | `Merchant account is suspended; new orders are not accepted.` | Account not active |
 | `403` | `IP not in whitelist.` | Your IP whitelist doesn't allow the caller's IP for this order type |
-| `422` | `Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required …` | Withdrawal not covered by your balance, counting fees and withdrawals in progress |
+| `422` | `Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required …` | Withdrawal's amount + fee not covered by your available balance, which already excludes withdrawals in progress |
 | `409` | `merchantOrderRef 'INV-10045' is already used by order ORD-…. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment.` | Another order that is in progress or completed already uses this reference. References of failed orders can be reused. |
 | `422` | `JazzCash deposits are disabled for this merchant.` | Channel disabled for your account |
 | `422` | `This Idempotency-Key was already used for a different order request.` | Same key, different `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` or `customerAccountNumber`. See [Idempotency](/api-reference/idempotency). |

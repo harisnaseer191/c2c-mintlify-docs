@@ -91,7 +91,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `400` | `'Amount' must be greater than '0'.` | Invalid amount |
 | `400` | `Amount must have at most 4 decimal places and be less than 100,000,000,000,000.` | Amount too precise or too large |
 | `400` | `Currency must be one of: PKR, INR, BDT.` | Unsupported currency |
-| `400` | `CustomerAccountNumber is required for withdrawal orders.` | Withdrawal without a payout account |
+| `400` | `CustomerAccountName can only be sent together with CustomerAccountNumber.` | Withdrawal with an account holder name but no account number |
 | `400` | `CallbackUrl must be a valid absolute http(s) URL.` | Not an absolute `http://` / `https://` URL. Same for `SuccessUrl` / `FailureUrl`. |
 | `400` | `'Txn Ref Digits Required' must be between 4 and 8. You entered 3.` | Out-of-range option |
 | `400` | Problem details, `errors.Idempotency-Key` | Header missing |

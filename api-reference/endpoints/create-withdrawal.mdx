@@ -8,7 +8,14 @@ description: "Create a withdrawal order that pays your customer out to their own
 
 Creates a **withdrawal**: a C2C member sends money from their own account to your customer's account. When the member confirms the payout, the amount plus fees is debited from your merchant wallet.
 
-Before creating the order, C2C checks that your merchant wallet can fund it (see [Funding check](#funding-check)). If a member is available, they're assigned immediately and the order starts in `AwaitingMemberPayout`. Otherwise the order is still **accepted** with status `Awaiting` and assigned automatically as soon as a member becomes available (see [Awaiting withdrawals](#awaiting-withdrawals)). You don't need to redirect the customer anywhere: their account details are part of the request. See the [Withdrawal flow](/guides/withdrawal-flow) for the full lifecycle.
+Before creating the order, C2C checks that your merchant wallet can fund it (see [Funding check](#funding-check)). If a member is available, they're assigned immediately and the order starts in `AwaitingMemberPayout`. Otherwise the order is still **accepted** with status `Awaiting` and assigned automatically as soon as a member becomes available (see [Awaiting withdrawals](#awaiting-withdrawals)). See the [Withdrawal flow](/guides/withdrawal-flow) for the full lifecycle.
+
+You can give the customer's receiving account in two ways:
+
+| You send | What happens |
+|----------|--------------|
+| `customerAccountNumber` (and optionally `customerAccountName`) | The account is part of the signed request. A member is assigned straight away; you don't need to redirect the customer anywhere. |
+| No `customerAccountNumber` | The order is accepted as `Awaiting` and **no member is assigned yet**. Redirect the customer to `paymentPageUrl`: the [hosted page](/guides/hosted-payment-page#withdrawals) asks them for their wallet account number and account holder name. A member is assigned as soon as they submit it. See [Collecting the account on the hosted page](#collecting-the-account-on-the-hosted-page). |
 
 | | |
 |---|---|
@@ -17,7 +24,7 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 | **Idempotency-Key** | Required |
 
 <Info>
-  Deposits and withdrawals use the same endpoint. Set `orderType` to `"Withdrawal"` and provide `customerAccountNumber`.
+  Deposits and withdrawals use the same endpoint. Set `orderType` to `"Withdrawal"`.
 </Info>
 
 ## Headers
@@ -47,17 +54,23 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 </ParamField>
 
 <ParamField body="walletType" type="string" required>
-  The type of the customer's receiving account. C2C assigns a member who can pay out to it.
+  The type of the customer's receiving account. C2C assigns a member who can pay out to it: a payout is sent within one provider, so a JazzCash customer is paid by a member with a JazzCash account and an Easypaisa customer by a member with an Easypaisa account. The wallet type is fixed by the order: on the hosted page the customer enters an account of this type and cannot choose another.
 
   One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
 </ParamField>
 
-<ParamField body="customerAccountNumber" type="string" required>
-  The customer's receiving account: a mobile wallet number such as `03001234567`, a Till ID or a bank account number. Up to 50 characters. Shown to the assigned member, who sends the payout to it.
+<ParamField body="customerAccountNumber" type="string">
+  The customer's receiving account: a mobile wallet number such as `03001234567`, a Till ID or a bank account number. Up to 50 characters. Shown to the assigned member, who sends the payout to it. Once the order is created it cannot be changed.
+
+  **Optional.** Leave it out to have the customer enter their account on the [hosted page](/guides/hosted-payment-page#withdrawals) instead.
 
   <Warning>
     C2C doesn't verify that the account exists or belongs to your customer. Validate it on your side before you submit. A payout sent to a wrong account can't be reversed by C2C.
   </Warning>
+</ParamField>
+
+<ParamField body="customerAccountName" type="string">
+  The name the customer's account is held in. Up to 200 characters. Shown to the assigned member so they can check it against the name their wallet app shows before sending. Only accepted together with `customerAccountNumber`; sending it alone is rejected with `400`.
 </ParamField>
 
 <ParamField body="currency" type="string" default="PKR">
@@ -87,11 +100,11 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 </ParamField>
 
 <ParamField body="successUrl" type="string">
-  Accepted and stored, but not used for withdrawals.
+  Absolute `http(s)` URL. If the customer has the [hosted page](/guides/hosted-payment-page#withdrawals) open when the payout completes, the page sends them here. See [Returning the customer to your site](/guides/hosted-payment-page#returning-the-customer-to-your-site).
 </ParamField>
 
 <ParamField body="failureUrl" type="string">
-  Accepted and stored, but not used for withdrawals.
+  Absolute `http(s)` URL. The hosted page sends the customer here when the withdrawal is rejected, cancelled or expires.
 </ParamField>
 
 <ParamField body="txnRefDigitsRequired" type="integer" default="4">
@@ -101,7 +114,7 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
 <ParamField body="signature" type="string" required>
   32-character lowercase hex MD5 of the other top-level fields (lowercased keys in ASCII order, `key=value` joined with `&`, `null` and empty values skipped) followed directly by your signing secret. See the [Signature Generation Guide](/api-reference/signature-guide).
 
-  `amount`, `customerAccountNumber` and every other field you send are signed, so the payout can't be changed in transit.
+  `amount`, `customerAccountNumber`, `customerAccountName` and every other field you send are signed, so the payout can't be changed in transit.
 
   **Example:** `5db94b5eaf95dba367d124c28cb019f0`
 </ParamField>
@@ -114,7 +127,7 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
       C2C's unique order ID. Store it for [status queries](/api-reference/endpoints/query-order-status) and webhook matching.
     </ResponseField>
     <ResponseField name="status" type="string">
-      Initial status: `AwaitingMemberPayout` when a member was assigned, or `Awaiting` when no eligible member was available yet.
+      Initial status: `AwaitingMemberPayout` when a member was assigned, or `Awaiting` when no eligible member was available yet or the customer still has to enter their account on the hosted page.
     </ResponseField>
     <ResponseField name="stage" type="string">
       Lifecycle stage: `Assigned` or `Awaiting` for a new withdrawal. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
@@ -126,10 +139,10 @@ Before creating the order, C2C checks that your merchant wallet can fund it (see
       C2C's human-readable reference, for example `ORD-20261008120621-a7b8`.
     </ResponseField>
     <ResponseField name="paymentPageUrl" type="string">
-      Returned for every order type. Withdrawals don't need it, so you can ignore it.
+      The hosted page for this withdrawal. Required when you didn't send `customerAccountNumber`: the customer enters their account there. Otherwise optional: it shows the customer the progress of their payout.
     </ResponseField>
     <ResponseField name="expiresAt" type="string">
-      Expiry of `paymentPageUrl`, 15 minutes after creation. It **isn't** the payout deadline.
+      Expiry of `paymentPageUrl`, 15 minutes after creation. It **isn't** the payout deadline. A withdrawal created without `customerAccountNumber` ends `CancelledTimeout` if the customer hasn't entered their account by then.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -231,9 +244,23 @@ order_id = response.json()["data"]["orderId"]
 }
 ```
 
-```json 400 Missing account
+```json 200 Awaiting the customer's account
 {
-  "error": "CustomerAccountNumber is required for withdrawal orders."
+  "data": {
+    "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=d1926af5-053d-4b39-a73b-c82f0d9af656&expires=1791462081&signature=Pq7...",
+    "status": "Awaiting",
+    "orderReference": "ORD-20261008120621-a7b8",
+    "expiresAt": "2026-10-08T12:21:21.717975Z",
+    "stage": "Awaiting",
+    "merchantOrderRef": "PAYOUT-20017"
+  }
+}
+```
+
+```json 400 Name without account
+{
+  "error": "CustomerAccountName can only be sent together with CustomerAccountNumber."
 }
 ```
 
@@ -269,7 +296,7 @@ order_id = response.json()["data"]["orderId"]
 
 | Status | When | Body |
 |--------|------|------|
-| `400` | Validation failed, for example `customerAccountNumber` missing or too long, amount ≤ 0, an amount with more than 4 decimal places or too large, or an unknown currency | `{"error": "..."}` |
+| `400` | Validation failed, for example `customerAccountNumber` too long, `customerAccountName` sent without an account number, amount ≤ 0, an amount with more than 4 decimal places or too large, or an unknown currency | `{"error": "..."}` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown enum value | `application/problem+json` |
 | `401` | API key missing, invalid or revoked | Empty body |
 | `401` | `signature` missing, malformed, invalid, or replayed under a different `Idempotency-Key` | `{"success": false, "error", "code", "traceId"}` |
@@ -310,9 +337,23 @@ When no eligible member is available, the withdrawal is accepted with status `Aw
 - While `Awaiting`, its **amount + fee stays reserved** against your balance: it counts as in progress for the funding check and for the Pending amount on your dashboard.
 - If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout` and you receive an `order.failed` webhook (`reason`: `No eligible member became available in time`). Nothing is debited.
 
+## Collecting the account on the hosted page
+
+When you create a withdrawal **without** `customerAccountNumber`:
+
+1. The order is accepted as `Awaiting`. Its amount + fee is reserved against your balance like any other withdrawal, but no member is assigned yet.
+2. Redirect the customer to `paymentPageUrl`. The page shows the amount and your name, and asks for the **wallet account number** and the **account holder name**. The wallet type is the `walletType` of the order; the amount cannot be changed.
+3. When the customer submits, C2C stores the account and assigns a member (`AwaitingMemberPayout`), or keeps the order `Awaiting` until a member is available (the 120-minute window starts then).
+4. The submitted account is final: it cannot be changed from the page afterwards. Submitting the same details twice has no further effect.
+
+If the customer doesn't submit their account before `expiresAt` (15 minutes), the order ends `CancelledTimeout`, the reservation is released and you receive an `order.failed` webhook (`reason`: `The customer did not provide their withdrawal account in time`). Create a new order to try again.
+
 ## Payout lifecycle
 
 ```text
+Awaiting (no account yet) ──customer submits account──▶ AwaitingMemberPayout, or Awaiting a member
+   └──not submitted within 15 min──▶ CancelledTimeout (order.failed webhook)
+
 Awaiting ──member available──▶ AwaitingMemberPayout
    └──no member within 120 min──▶ CancelledTimeout (order.failed webhook)
 
@@ -320,13 +361,15 @@ AwaitingMemberPayout ──member confirms payout──▶ Completed      (order
         │
         ├──member rejects────────────────────────▶ Rejected       (order.failed webhook)
         │
+        ├──member reports an abnormal payment───▶ ManualReview    (no webhook until C2C resolves it)
+        │
         └──payout window passes (60 min default)
               ├── retries left → reassigned to another member (stays AwaitingMemberPayout)
               └── no retries left → ManualReview (no webhook until C2C resolves it)
 ```
 
 <Warning>
-  Treat a withdrawal as paid only when its status is `Completed`. An order in `ManualReview` is being handled by C2C operations. Don't resubmit the payout with a new `Idempotency-Key` while it is unresolved, or the customer could be paid twice.
+  Treat a withdrawal as paid only when its status is `Completed`. An order in `ManualReview` is being handled by C2C operations — for example the member reported that the payout could not be completed normally or that they cannot tell whether it went through. Don't resubmit the payout with a new `Idempotency-Key` while it is unresolved, or the customer could be paid twice.
 </Warning>
 
 ## Next steps

@@ -1,6 +1,6 @@
 ---
 title: "Hosted Payment Page"
-description: "The C2C-hosted checkout page your customer uses to complete a deposit."
+description: "The C2C-hosted page your customer uses to pay a deposit, or to receive a withdrawal."
 ---
 
 ## Overview
@@ -23,7 +23,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 | Lifetime | **15 minutes** from order creation (`expiresAt` in the response) |
 | Wallet | `wallet` is the `walletType` you requested (`jazzcash`, `easypaisa`, `tillid` or `bank`). The page opens directly on that wallet. It isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
-| Withdrawals | A URL is also returned for withdrawals, but customers don't need to visit it |
+| Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
 
 <Warning>
   Redirect the customer as soon as you receive the URL. Don't cache it, email it hours later, or reuse it for another order. If the link expires, the order ends `Expired` (or `CancelledTimeout` if no member was ever assigned) and you receive an `order.failed` webhook. Create a **new** order with a new `Idempotency-Key`; you can reuse the same `merchantOrderRef`.
@@ -38,13 +38,15 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
     If the order is `Awaiting`, an online member is assigned at this point. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until an account can be shown or the link expires. The customer must not send money until an account is shown.
   </Step>
   <Step title="Pay">
-    The page shows the receiving **account number** and **account holder name**. The customer sends exactly the order amount from their own wallet app.
+    The page shows the receiving account and its **account holder name**. The account is always with the wallet the customer is paying from — a JazzCash customer is shown a JazzCash account, an Easypaisa customer an Easypaisa account — and is either an **account number** or a **Till ID**; the page labels which. The customer sends exactly the order amount from their own wallet app.
   </Step>
   <Step title="Confirm the transfer">
-    The customer enters the **last digits of the transaction ID** from their wallet app. The order's `txnRefDigitsRequired` sets how many digits (4 by default). The order moves to `AwaitingMemberConfirmation`.
+    The customer enters the **last digits of the transaction ID** from their wallet app. The order's `txnRefDigitsRequired` sets how many digits (4 by default). They can also attach a **screenshot of the payment** (optional; JPEG, PNG or WebP up to 5 MB), which the member sees when verifying. The order moves to `AwaitingMemberConfirmation`.
+
+    The digits and the screenshot are the customer's claim, not proof: the order completes only when the member confirms the money arrived.
   </Step>
   <Step title="Wait for verification">
-    The page waits while the member verifies the payment, and updates by itself to a success or a cancelled/expired screen. If you set `successUrl` / `failureUrl`, it then sends the customer back to your site.
+    The page waits while the member verifies the payment, and updates by itself to a success or a cancelled/expired screen. If you set `successUrl` / `failureUrl`, it then sends the customer back to your site. If the customer reloads or reopens the link meanwhile, the page resumes here instead of asking for the digits again.
   </Step>
 </Steps>
 
@@ -52,9 +54,34 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
   If the assigned member goes offline before the customer opens the page, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different wallet type than you requested, your fee is re-quoted for that wallet.
 </Note>
 
+## Withdrawals
+
+For a [withdrawal](/api-reference/endpoints/create-withdrawal) the page works the other way round: the customer **receives** money, so it never shows an account to pay and never asks for a transaction ID.
+
+<Steps>
+  <Step title="Enter the receiving account">
+    Only when you created the withdrawal **without** `customerAccountNumber`. The page is titled **Receive Your Withdrawal** and shows your merchant name, the amount and the order reference. The customer enters:
+
+    - **Wallet Account Number** — checked against the order's `walletType` (JazzCash / Easypaisa: an 11-digit mobile account number such as `03001234567`; `+92…` is accepted and normalised)
+    - **Account Holder Name**
+
+    The wallet provider is the order's `walletType` and the amount is the order's `amount`; the customer can change neither. They must submit before the link expires (15 minutes), otherwise the order ends `CancelledTimeout`.
+  </Step>
+  <Step title="Processing">
+    After submitting — or immediately, when you sent the account yourself — the page shows that the withdrawal is being processed, with the wallet, the account (all but the last 4 digits hidden) and the account holder name. It updates by itself. Reloading the page returns here; the submitted account cannot be edited, and submitting the same details again has no effect.
+  </Step>
+  <Step title="Outcome">
+    When the member has sent the payout the page shows **Withdrawal sent**. If the withdrawal is rejected, cancelled or expires it shows that no payment was sent. If you set `successUrl` / `failureUrl`, the customer is then returned to your site.
+  </Step>
+</Steps>
+
+<Note>
+  An account entered on the page is exactly as authoritative as one you send in `customerAccountNumber`: the member pays that account. Send the customer to the page only from a session you trust to be theirs.
+</Note>
+
 ## Returning the customer to your site
 
-Set `successUrl` and `failureUrl` when you [create the deposit](/api-reference/endpoints/create-deposit). When the order reaches a final status while the customer still has the page open, the page shows the result, then sends the customer back to you after **5 seconds**. A "Return now" link lets them go back straight away.
+Set `successUrl` and `failureUrl` when you create the [deposit](/api-reference/endpoints/create-deposit) or [withdrawal](/api-reference/endpoints/create-withdrawal). When the order reaches a final status while the customer still has the page open, the page shows the result, then sends the customer back to you after **5 seconds**. A "Return now" link lets them go back straight away.
 
 | Final status | Customer is sent to |
 |--------------|---------------------|
@@ -101,4 +128,6 @@ app.post('/checkout/c2c', async (req, res) => {
 
 - The page and its backend endpoints are operated by C2C. Your API key and secrets are never involved, and the customer never sees them.
 - The page never asks for the customer's wallet PIN or OTP. Customers pay from their own wallet app.
+- A payment screenshot is stored by C2C and shown only to the member assigned to the order and to C2C operations. It has no public link.
+- On a withdrawal the page never shows a member's account, and shows the customer's own account masked after it was submitted.
 - Never build or modify payment page URLs yourself. Always use the `paymentPageUrl` returned by the API.

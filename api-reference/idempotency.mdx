@@ -29,7 +29,7 @@ Content-Type: application/json
 | Same signed body with a **different** key (same API key, within 24 hours) | `401 SIGNATURE_REPLAYED`. A body's signature is bound to the first key it was accepted with. See [Replay protection](/api-reference/signature-guide#replay-protection). |
 | Same key used with a **different** API key | Treated as a new key. Keys are scoped per API key. |
 
-The **terms** compared are `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` and `customerAccountNumber`. Other fields (for example `callbackUrl` or `metadata`) aren't compared.
+The **terms** compared are `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef`, `customerAccountNumber` and `customerAccountName`. Other fields (for example `callbackUrl` or `metadata`) aren't compared.
 
 <Warning>
   Never reuse a key for a different order. A retry must send the same terms as the original request, or it's rejected with `422`. Keys created before this check was introduced aren't checked: reusing one of those returns the original order whatever the terms.

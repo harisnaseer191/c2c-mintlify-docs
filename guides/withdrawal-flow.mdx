@@ -7,7 +7,12 @@ description: "How a C2C withdrawal pays your customer out through a verified mem
 
 A withdrawal pays money **to** your customer. C2C assigns a member who sends the payout from their own account to the customer's account. When the member confirms, C2C debits your merchant wallet by the **amount plus fee**.
 
-There is no customer-facing page in this flow: you supply the customer's receiving account when you create the order.
+You choose where the customer's receiving account comes from:
+
+- **You supply it** (`customerAccountNumber`) when you create the order. The customer doesn't need to visit any page.
+- **The customer supplies it.** Create the order without `customerAccountNumber` and redirect the customer to the returned `paymentPageUrl`: the [hosted page](/guides/hosted-payment-page#withdrawals) collects their wallet account number and account holder name, then shows the payout's progress.
+
+A payout is always sent within one provider: a JazzCash customer is paid from a member's JazzCash account, an Easypaisa customer from a member's Easypaisa account. C2C therefore assigns the withdrawal only to a member who has an approved account with the customer's provider. This is handled by C2C and doesn't change anything in your integration, but it is why `walletType` must be the wallet the customer really holds.
 
 ## Flow diagram
 
@@ -42,20 +47,24 @@ Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 
 - `orderType: "Withdrawal"`
 - `walletType`: the customer's receiving wallet or account type
-- `customerAccountNumber`: where to send the money
+- `customerAccountNumber`: where to send the money (optional: leave it out to have the customer enter it on the hosted page), and optionally `customerAccountName`, the name the account is held in
 - `amount`, optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
 - a unique `Idempotency-Key` and a valid `signature` field. Withdrawals are always signature-enforced, and the signature covers the account number and amount, so they can't be changed in transit.
 
 C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, channel enabled, and a `merchantOrderRef` that isn't already used by a payout in progress or completed (`409`). It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees. The fee is fixed when the order is accepted; later fee-rule changes apply to new orders only.
 
-C2C then looks for an available member with a matching account whose limit covers the amount:
+If you didn't send `customerAccountNumber`, the order is accepted as `Awaiting` and waits for the customer: redirect them to `paymentPageUrl` (valid for 15 minutes). The steps below continue once they have submitted their account. If they don't, the order ends `CancelledTimeout`.
+
+C2C then looks for an available member who has an approved account with the customer's provider (JazzCash for a JazzCash wallet, Easypaisa for an Easypaisa wallet) and whose limit covers the amount:
 
 - **Member found:** the order starts in `AwaitingMemberPayout` (stage `Assigned`).
 - **No member right now:** the order is still **accepted** as `Awaiting` (stage `Awaiting`). It's assigned automatically as soon as a member becomes available: a member comes online, a member frees capacity, or C2C's once-a-minute background check finds one. While `Awaiting`, its **amount + fee stays reserved** against your balance (it counts as in progress for the funding check and for the Pending amount on your dashboard). If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout`.
 
 ### 3. Member pays out
 
-Once assigned, the order is in `AwaitingMemberPayout`. The member sees the customer's account and amount in their app, sends the payout, and confirms it.
+Once assigned, the order is in `AwaitingMemberPayout`. The member sees the customer's wallet, account number, account holder name and the amount in their app, sends the payout, and confirms it with the account they paid from and the last 4 digits of the payment's transaction ID.
+
+If the member cannot complete the payout normally — the account details are wrong, the transfer is refused, the provider is down, or they cannot tell whether the money left — they report an **abnormal payment**. The order then goes to `ManualReview` instead of failing: C2C operations check what happened and complete or close it, so a payout that may have been sent is never sent a second time.
 
 ### 4. Outcome
 
@@ -65,6 +74,8 @@ Once assigned, the order is in `AwaitingMemberPayout`. The member sees the custo
 | Member rejects the order | `Rejected` | `order.failed` | unchanged |
 | Payout window (60 min by default) passes, retries left | stays `AwaitingMemberPayout`, reassigned to another member | none | unchanged |
 | Payout window passes, `maxRetryCount` reached | `ManualReview` | none until resolved | unchanged until resolved |
+| Member reports an abnormal payment | `ManualReview` | none until resolved | unchanged until resolved |
+| Customer doesn't enter their account within 15 minutes (order created without `customerAccountNumber`) | `CancelledTimeout` | `order.failed` (`reason`: `The customer did not provide their withdrawal account in time`) | unchanged, reservation released |
 | C2C resolves a review | `Completed` / `Cancelled` | `order.completed` / `order.failed` | per outcome |
 | No member available within 120 minutes (`Awaiting` order) | `CancelledTimeout` | `order.failed` (`reason`: `No eligible member became available in time`) | unchanged, reservation released |
 
@@ -74,12 +85,13 @@ Once assigned, the order is in `AwaitingMemberPayout`. The member sees the custo
 stateDiagram-v2
     [*] --> AwaitingMemberPayout: order created, member assigned
     [*] --> Awaiting: order created, no eligible member yet
-    Awaiting --> AwaitingMemberPayout: member becomes available
-    Awaiting --> CancelledTimeout: no member within 120 min
+    Awaiting --> AwaitingMemberPayout: member becomes available (after the customer's account is known)
+    Awaiting --> CancelledTimeout: no member within 120 min, or no account from the customer within 15 min
     AwaitingMemberPayout --> AwaitingMemberPayout: window passed, reassigned (up to maxRetryCount)
     AwaitingMemberPayout --> Completed: member confirms payout
     AwaitingMemberPayout --> Rejected: member rejects
     AwaitingMemberPayout --> ManualReview: window passed, no retries left
+    AwaitingMemberPayout --> ManualReview: member reports an abnormal payment
     ManualReview --> Completed: resolved by C2C
     ManualReview --> Cancelled: resolved by C2C
     Completed --> [*]

@@ -21,7 +21,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 |----------|--------|
 | Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
 | Lifetime | **15 minutes** from order creation (`expiresAt` in the response) |
-| Wallet | `wallet` is the `walletType` you requested (`jazzcash`, `easypaisa`, `tillid` or `bank`). The page opens directly on that wallet. It isn't part of the signature. |
+| Wallet | `wallet` is the [payment method](/guides/payment-methods) (`walletType`) you requested: `jazzcash`, `jazzcashtillid`, `jazzcashqr`, `easypaisa`, `tillid` or `easypaisaqr`. The page opens directly on that method. A `BankAccount` deposit carries `wallet=bank`; bank accounts aren't offered on the page for now, so that link opens on the list of available methods instead. `wallet` isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
 | Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
 
@@ -32,27 +32,49 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 ## What your customer sees
 
 <Steps>
-  <Step title="Open on your wallet">
-    The page shows your merchant name, the amount and the C2C order reference, and opens directly on the `walletType` you requested (for example JazzCash). The customer doesn't pick a wallet first. C2C reserves the receiving account, and the order moves to `AwaitingCustomerPayment`. If other wallets are enabled for your account, the customer can tap **Change** to pay with one of those instead.
+  <Step title="Open on your payment method">
+    The page shows your merchant name, the amount and the C2C order reference, and opens directly on the `walletType` you requested (for example JazzCash QR). The customer doesn't pick a method first. C2C reserves a receiving account of exactly that method, and the order moves to `AwaitingCustomerPayment`. If other methods are enabled for your account and available for the order, the customer can tap **Change** to pay with one of those instead.
 
-    If the order is `Awaiting`, an online member is assigned at this point. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until an account can be shown or the link expires. The customer must not send money until an account is shown.
+    If the order is `Awaiting`, an online member is assigned at this point. If nobody with an account of that method is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until it can show where to pay or the link expires. The customer must not send money until an account number, Till ID or QR code is shown.
   </Step>
-  <Step title="Pay">
-    The page shows the receiving account and its **account holder name**. The account is always with the wallet the customer is paying from — a JazzCash customer is shown a JazzCash account, an Easypaisa customer an Easypaisa account — and is either an **account number** or a **Till ID**; the page labels which. The customer sends exactly the order amount from their own wallet app.
-  </Step>
-  <Step title="Confirm the transfer">
-    The customer enters the **last digits of the transaction ID** from their wallet app. The order's `txnRefDigitsRequired` sets how many digits (4 by default). They can also attach a **screenshot of the payment** (optional; JPEG, PNG or WebP up to 5 MB), which the member sees when verifying. The order moves to `AwaitingMemberConfirmation`.
+  <Step title="Pay and confirm">
+    The customer sends exactly the order amount from their own wallet app and confirms on the page. What the page shows and what the customer submits depend on the method: see [Account number and Till ID methods](#account-number-and-till-id-methods) and [QR methods](#qr-methods). In both cases the order moves to `AwaitingMemberConfirmation`.
 
-    The digits and the screenshot are the customer's claim, not proof: the order completes only when the member confirms the money arrived.
+    Whatever the customer submits is their claim, not proof: the order completes only when the member confirms the money arrived.
   </Step>
   <Step title="Wait for verification">
-    The page waits while the member verifies the payment, and updates by itself to a success or a cancelled/expired screen. If you set `successUrl` / `failureUrl`, it then sends the customer back to your site. If the customer reloads or reopens the link meanwhile, the page resumes here instead of asking for the digits again.
+    The page waits while the member verifies the payment, and updates by itself to a success or a cancelled/expired screen. If you set `successUrl` / `failureUrl`, it then sends the customer back to your site. If the customer reloads or reopens the link meanwhile, the page resumes here instead of asking them to confirm again.
   </Step>
 </Steps>
 
 <Note>
-  If the assigned member goes offline before the customer opens the page, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different wallet type than you requested, your fee is re-quoted for that wallet.
+  If the assigned member goes offline before the customer opens the page, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different method than you requested, your fee is re-quoted for the method used.
 </Note>
+
+### Account number and Till ID methods
+
+`JazzCash`, `JazzCashTillID`, `Easypaisa` and `TillID`.
+
+The page shows the provider, the receiving **account number** or **Till ID** with a copy button, the exact amount to send, numbered steps for that provider's app and a **How to Pay** guide. The account holder's name isn't shown.
+
+1. The customer copies the account number or Till ID.
+2. They pay exactly the order amount in their JazzCash or Easypaisa app.
+3. They enter the **last digits of the transaction ID** (TID) of that payment. The order's `txnRefDigitsRequired` sets how many digits (4 by default). The confirm button stays disabled until they have entered them.
+
+They can also attach a **screenshot of the payment** (optional; JPEG, PNG or WebP up to 5 MB), which the member sees when verifying.
+
+### QR methods
+
+`JazzCashQR` and `EasypaisaQR`. These methods never ask for a transaction ID, and `txnRefDigitsRequired` has no effect on them.
+
+1. The customer first submits the **account they pay from**. For JazzCash QR that is their JazzCash account number (`03XXXXXXXXX`); for Easypaisa QR it is the last 4 digits of their Easypaisa IBAN. The member uses it to find the incoming payment.
+2. Only then does the page show the member's **QR code**, with a **Save QR** button. A button that opens the JazzCash or Easypaisa app is shown only when C2C has configured a verified app link for that provider.
+3. The customer scans the code in their JazzCash or Easypaisa app, or loads the saved image there, and pays exactly the order amount.
+4. They tap **I've Completed Payment**. They can attach an optional payment screenshot first, as above.
+
+Until they tap **I've Completed Payment**, the customer can correct the account they entered. Afterwards it is final.
+
+The page remembers the submitted account in that browser (local storage, separately for JazzCash and Easypaisa) and prefills it on the customer's next QR payment. Nothing is sent to C2C until the customer submits it, and they can clear it from the page.
 
 ## Withdrawals
 
@@ -129,5 +151,6 @@ app.post('/checkout/c2c', async (req, res) => {
 - The page and its backend endpoints are operated by C2C. Your API key and secrets are never involved, and the customer never sees them.
 - The page never asks for the customer's wallet PIN or OTP. Customers pay from their own wallet app.
 - A payment screenshot is stored by C2C and shown only to the member assigned to the order and to C2C operations. It has no public link.
+- On the QR methods, the account the customer says they pay from is stored with the order for the member who verifies the payment. It isn't returned by the Merchant API or sent in webhooks.
 - On a withdrawal the page never shows a member's account, and shows the customer's own account masked after it was submitted.
 - Never build or modify payment page URLs yourself. Always use the `paymentPageUrl` returned by the API.

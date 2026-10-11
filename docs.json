@@ -12,7 +12,7 @@
     "dark": "/logo/logo-dark.svg"
   },
   "api": {
-    "baseUrl": "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io",
+    "baseUrl": "https://api.c2cpayment.net",
     "playground": {
       "display": "simple"
     },
@@ -34,6 +34,7 @@
             "pages": [
               "guides/deposit-flow",
               "guides/withdrawal-flow",
+              "guides/payment-methods",
               "guides/hosted-payment-page",
               "guides/order-status",
               "guides/webhooks"

@@ -47,6 +47,7 @@ mint broken-links
 ├── guides/
 │   ├── deposit-flow.mdx
 │   ├── withdrawal-flow.mdx
+│   ├── payment-methods.mdx            # The six deposit methods (walletType), exact matching
 │   ├── hosted-payment-page.mdx
 │   ├── order-status.mdx
 │   └── webhooks.mdx

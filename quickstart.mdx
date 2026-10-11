@@ -10,7 +10,7 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
     Ask C2C for a merchant **API key** (`mk_live_...`) and **signing secret** (`sksec_...`) for the development environment. Both are shown only once. Store them as environment variables:
 
     ```bash
-    export C2C_BASE_URL="https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io"
+    export C2C_BASE_URL="https://api.c2cpayment.net"
     export C2C_API_KEY="mk_live_..."
     export C2C_SIGNING_SECRET="sksec_..."
     ```
@@ -109,7 +109,7 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
   </Step>
 
   <Step title="Redirect the customer">
-    Send the customer to `paymentPageUrl` within **15 minutes**. The page opens on the `walletType` you requested. They pay the displayed account and enter the last digits of their transaction ID. See [Hosted payment page](/guides/hosted-payment-page).
+    Send the customer to `paymentPageUrl` within **15 minutes**. The page opens on the `walletType` you requested. With `JazzCash`, as here, they pay the displayed account number and enter the last digits of their transaction ID. Other [payment methods](/guides/payment-methods) ask for something else: on the QR methods the customer gives the account they pay from instead of a transaction ID. See [Hosted payment page](/guides/hosted-payment-page).
   </Step>
 
   <Step title="Get the outcome">

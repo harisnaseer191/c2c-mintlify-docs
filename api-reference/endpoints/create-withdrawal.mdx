@@ -57,6 +57,8 @@ You can give the customer's receiving account in two ways:
   The type of the customer's receiving account. C2C assigns a member who can pay out to it: a payout is sent within one provider, so a JazzCash customer is paid by a member with a JazzCash account and an Easypaisa customer by a member with an Easypaisa account. The wallet type is fixed by the order: on the hosted page the customer enters an account of this type and cannot choose another.
 
   One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
+
+  `JazzCashTillID`, `JazzCashQR` and `EasypaisaQR` are deposit-only [payment methods](/guides/payment-methods): a withdrawal on one of them is rejected with `400`.
 </ParamField>
 
 <ParamField body="customerAccountNumber" type="string">
@@ -108,7 +110,7 @@ You can give the customer's receiving account in two ways:
 </ParamField>
 
 <ParamField body="txnRefDigitsRequired" type="integer" default="4">
-  Accepted (`4` to `8`), but only used by the deposit payment page.
+  Accepted (`4` to `8`), but it has no effect on a withdrawal. It is only used by the deposit payment page, for the account number and Till ID methods.
 </ParamField>
 
 <ParamField body="signature" type="string" required>
@@ -152,7 +154,7 @@ You can give the customer's receiving account in two ways:
 # "signature" is computed as described in the Signature Generation Guide.
 # This value is the guide's worked example (example signing secret).
 curl --request POST \
-  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
+  --url https://api.c2cpayment.net/api/merchant/orders \
   --header "C2C-API-Key: $C2C_API_KEY" \
   --header "Content-Type: application/json" \
   --header "Idempotency-Key: PAYOUT-20017" \
@@ -173,7 +175,7 @@ const payload = {
 };
 
 const response = await fetch(
-  'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders',
+  'https://api.c2cpayment.net/api/merchant/orders',
   {
     method: 'POST',
     headers: {
@@ -204,7 +206,7 @@ payload = {
 }
 
 response = requests.post(
-    "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders",
+    "https://api.c2cpayment.net/api/merchant/orders",
     json={**payload, "signature": sign_body(payload, os.environ["C2C_SIGNING_SECRET"])},
     headers={
         "C2C-API-Key": os.environ["C2C_API_KEY"],
@@ -264,6 +266,12 @@ order_id = response.json()["data"]["orderId"]
 }
 ```
 
+```json 400 Deposit-only method
+{
+  "error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, TillID, BankAccount."
+}
+```
+
 ```json 401 Signature
 {
   "success": false,
@@ -297,6 +305,7 @@ order_id = response.json()["data"]["orderId"]
 | Status | When | Body |
 |--------|------|------|
 | `400` | Validation failed, for example `customerAccountNumber` too long, `customerAccountName` sent without an account number, amount ≤ 0, an amount with more than 4 decimal places or too large, or an unknown currency | `{"error": "..."}` |
+| `400` | `walletType` is `JazzCashTillID`, `JazzCashQR` or `EasypaisaQR`, which are deposit-only | `{"error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, TillID, BankAccount."}` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown enum value | `application/problem+json` |
 | `401` | API key missing, invalid or revoked | Empty body |
 | `401` | `signature` missing, malformed, invalid, or replayed under a different `Idempotency-Key` | `{"success": false, "error", "code", "traceId"}` |
@@ -304,7 +313,7 @@ order_id = response.json()["data"]["orderId"]
 | `413` | Body larger than 64 KB | `{"code": "PAYLOAD_TOO_LARGE", ...}` |
 | `409` | `merchantOrderRef` is already used by a payout that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | Your available balance can't cover this payout plus its fee | `{"error": "Insufficient merchant balance: ..."}` |
-| `422` | The wallet channel is disabled for withdrawals on your account | `{"error": "..."}` |
+| `422` | The payment method (`walletType`) is disabled for withdrawals on your account | `{"error": "..."}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 
 ## Funding check

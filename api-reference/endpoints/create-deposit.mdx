@@ -8,7 +8,7 @@ description: "Create a deposit order and get a hosted payment page URL where you
 
 Creates a **deposit**: your customer pays money into an account held by a C2C member, and the amount, minus fees, is credited to your merchant wallet once the member confirms receipt.
 
-C2C assigns an available member when the order is created and returns a `paymentPageUrl`. Redirect your customer to that hosted page. There they pick their wallet, see the account to pay, send the money from their wallet app, and enter the last digits of the transaction ID. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
+C2C assigns an available member when the order is created and returns a `paymentPageUrl`. Redirect your customer to that hosted page. It opens on the [payment method](/guides/payment-methods) you requested in `walletType`: the customer sees the account number, Till ID or QR code to pay, sends the money from their wallet app, and confirms the payment on the page. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
 
 The order is **always accepted**. If no eligible member is available right now, it's created with status `Awaiting`, and a member is assigned when the customer opens the payment page.
 
@@ -49,9 +49,21 @@ The order is **always accepted**. If no eligible member is available right now, 
 </ParamField>
 
 <ParamField body="walletType" type="string" required>
-  The wallet the customer intends to pay with. C2C uses it to assign a member with an account at the same provider — `JazzCash`: a JazzCash account number or Till ID; `Easypaisa`: an Easypaisa account number or Till ID; `TillID`: an Easypaisa Till ID — and the payment page opens directly on this wallet. The customer can still switch to another wallet that is enabled for you on the payment page.
+  The [payment method](/guides/payment-methods) the customer pays with. C2C assigns a member with a receiving account of **exactly this method**, and the payment page opens directly on it.
 
-  One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
+  One of `JazzCash`, `JazzCashTillID`, `JazzCashQR`, `Easypaisa`, `TillID`, `EasypaisaQR`, `BankAccount`.
+
+  | Value | The customer pays to |
+  |-------|----------------------|
+  | `JazzCash` | A JazzCash account number |
+  | `JazzCashTillID` | A JazzCash Till ID |
+  | `JazzCashQR` | A JazzCash QR code |
+  | `Easypaisa` | An Easypaisa account number |
+  | `TillID` | An Easypaisa Till ID |
+  | `EasypaisaQR` | An Easypaisa QR code |
+  | `BankAccount` | Accepted, but bank accounts aren't offered on the payment page for now: the page opens on the list of available methods and the customer picks one of the six above. |
+
+  No method falls back to another. `JazzCash` and `Easypaisa` mean the account number only: request `JazzCashTillID` or `TillID` for a Till ID. If no account of the requested method is available, the order is accepted as `Awaiting`. On the payment page the customer can still switch to another method that is enabled for you.
 </ParamField>
 
 <ParamField body="currency" type="string" default="PKR">
@@ -89,7 +101,9 @@ The order is **always accepted**. If no eligible member is available right now, 
 </ParamField>
 
 <ParamField body="txnRefDigitsRequired" type="integer" default="4">
-  How many trailing digits of the wallet transaction ID the customer must enter on the payment page. `4` to `8`.
+  `4` to `8`. Applies to the account number and Till ID methods only (`JazzCash`, `JazzCashTillID`, `Easypaisa`, `TillID`): how many trailing digits of the wallet transaction ID the customer enters on the payment page.
+
+  It has no effect on a payment made with `JazzCashQR` or `EasypaisaQR`. Those methods don't ask for a transaction ID: the customer gives their JazzCash account number (`JazzCashQR`) or the last 4 digits of their Easypaisa IBAN (`EasypaisaQR`) instead. See [What the customer submits](/guides/payment-methods#what-the-customer-submits).
 </ParamField>
 
 <ParamField body="maxRetryCount" type="integer" default="3">
@@ -135,7 +149,7 @@ The order is **always accepted**. If no eligible member is available right now, 
 # "signature" is computed as described in the Signature Generation Guide.
 # This value is the guide's worked example (example signing secret).
 curl --request POST \
-  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders \
+  --url https://api.c2cpayment.net/api/merchant/orders \
   --header "C2C-API-Key: $C2C_API_KEY" \
   --header "Content-Type: application/json" \
   --header "Idempotency-Key: INV-10045" \
@@ -155,7 +169,7 @@ const payload = {
 };
 
 const response = await fetch(
-  'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders',
+  'https://api.c2cpayment.net/api/merchant/orders',
   {
     method: 'POST',
     headers: {
@@ -185,7 +199,7 @@ payload = {
 }
 
 response = requests.post(
-    "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders",
+    "https://api.c2cpayment.net/api/merchant/orders",
     json={**payload, "signature": sign_body(payload, os.environ["C2C_SIGNING_SECRET"])},
     headers={
         "C2C-API-Key": os.environ["C2C_API_KEY"],
@@ -271,7 +285,7 @@ data = response.json()["data"]
 | `403` | Merchant account not active, or caller IP not whitelisted | `{"error": "..."}` |
 | `413` | Body larger than 64 KB | `{"success": false, "error", "code": "PAYLOAD_TOO_LARGE", "traceId"}` |
 | `409` | `merchantOrderRef` is already used by an order that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
-| `422` | The wallet channel is disabled for your account: `JazzCash deposits are disabled for this merchant.` | `{"error": "..."}` |
+| `422` | The payment method (`walletType`) is disabled for deposits on your account, for example `JazzCash deposits are disabled for this merchant.` or `JazzCashQR deposits are disabled for this merchant.` | `{"error": "..."}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 
 See [Errors](/api-reference/errors) for the complete error model.
@@ -284,7 +298,7 @@ See [Errors](/api-reference/errors) for the complete error model.
 
 1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes.
 2. If the order is `Awaiting`, a member is assigned when the customer opens the payment page. Until one is online the page shows "Finding an available agent…" and re-checks every 10 seconds.
-3. The customer pays and submits the transaction digits. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
+3. The customer pays and confirms on the page: with the last digits of the transaction ID, or on the QR methods by giving the account they pay from. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
 4. The member confirms (`Completed`) or rejects (`Rejected`) the payment.
 5. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
 
@@ -300,6 +314,9 @@ See [Errors](/api-reference/errors) for the complete error model.
   </Card>
   <Card title="Query order status" icon="magnifying-glass" href="/api-reference/endpoints/query-order-status">
     Track the order to completion
+  </Card>
+  <Card title="Payment methods" icon="credit-card" href="/guides/payment-methods">
+    The six methods and how they are matched
   </Card>
   <Card title="Hosted payment page" icon="window-maximize" href="/guides/hosted-payment-page">
     What your customer sees

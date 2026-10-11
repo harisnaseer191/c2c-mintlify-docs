@@ -34,7 +34,7 @@ Awaiting → Assigned → Sent → Approved / Rejected → Completed / Failed
 |-------|---------|
 | `Awaiting` | Accepted, waiting for an eligible member |
 | `Assigned` | A member has the order. No money has been sent yet. |
-| `Sent` | Deposit: the customer submitted their payment (transaction digits). Withdrawal: the member sent the payout. |
+| `Sent` | Deposit: the customer confirmed their payment on the payment page. Withdrawal: the member sent the payout. |
 | `Approved` / `Rejected` | The member's decision |
 | `Completed` | Settled: your merchant wallet was credited (deposit) or debited (withdrawal) |
 | `Failed` | Final without settlement |
@@ -58,7 +58,7 @@ With today's processing, approval and rejection happen in the same step as compl
     |--------|-----------|-------------|
     | `Awaiting` | Both | An eligible member. Deposit: assigned when the customer opens the payment page. Withdrawal: assigned automatically as soon as a member is available — or, when you created it without `customerAccountNumber`, waiting first for the customer to enter their account on the hosted page. |
     | `Queued` | Deposit | Customer to open the payment page |
-    | `AwaitingCustomerPayment` | Deposit | Customer to pay and submit the transaction digits |
+    | `AwaitingCustomerPayment` | Deposit | Customer to pay and confirm on the payment page: the last digits of the transaction ID, or on the QR methods the account they pay from. See [Payment methods](/guides/payment-methods#what-the-customer-submits). |
     | `AwaitingMemberConfirmation` | Deposit | Member to verify the payment |
     | `AwaitingMemberPayout` | Withdrawal | Member to send and confirm the payout |
     | `ManualReview` | Both | C2C operations to resolve the order |

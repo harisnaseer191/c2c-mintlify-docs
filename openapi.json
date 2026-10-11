@@ -10,6 +10,10 @@
   },
   "servers": [
     {
+      "url": "https://api.c2cpayment.net",
+      "description": "Production"
+    },
+    {
       "url": "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io",
       "description": "Development / integration"
     }
@@ -38,7 +42,7 @@
         ],
         "operationId": "createOrder",
         "summary": "Create a deposit or withdrawal order",
-        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer; orderType=Withdrawal requires customerAccountNumber. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key → 401 SIGNATURE_REPLAYED.",
+        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer, who is given a receiving account of exactly the requested walletType (payment method); orderType=Withdrawal pays the customer's account (customerAccountNumber, or entered by the customer on the hosted page when omitted) and accepts walletType JazzCash, Easypaisa, TillID or BankAccount only. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key → 401 SIGNATURE_REPLAYED.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -103,7 +107,7 @@
             }
           },
           "400": {
-            "description": "Validation failed ({error}), e.g. amount with more than 4 decimal places or not less than 100,000,000,000,000; or request could not be bound, e.g. missing Idempotency-Key / unknown enum (application/problem+json).",
+            "description": "Validation failed ({error}), e.g. amount with more than 4 decimal places or not less than 100,000,000,000,000, or a withdrawal on a deposit-only walletType (JazzCashTillID, JazzCashQR, EasypaisaQR); or request could not be bound, e.g. missing Idempotency-Key / unknown enum (application/problem+json).",
             "content": {
               "application/json": {
                 "schema": {
@@ -164,7 +168,7 @@
             }
           },
           "422": {
-            "description": "Withdrawal's amount + fee not covered by the merchant's available balance (which excludes withdrawals in progress, including Awaiting), wallet channel disabled, or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
+            "description": "Withdrawal's amount + fee not covered by the merchant's available balance (which excludes withdrawals in progress, including Awaiting), payment method (walletType) disabled for the merchant and order type, or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
             "content": {
               "application/json": {
                 "schema": {
@@ -428,8 +432,12 @@
           "JazzCash",
           "Easypaisa",
           "TillID",
-          "BankAccount"
-        ]
+          "BankAccount",
+          "JazzCashTillID",
+          "JazzCashQR",
+          "EasypaisaQR"
+        ],
+        "description": "The payment method. JazzCash = JazzCash account number; JazzCashTillID = JazzCash Till ID; JazzCashQR = JazzCash QR code; Easypaisa = Easypaisa account number; TillID = Easypaisa Till ID; EasypaisaQR = Easypaisa QR code; BankAccount = bank account. Deposits: the customer is only ever given a receiving account of exactly the requested method (JazzCash and Easypaisa mean the account number only; request JazzCashTillID or TillID for a Till ID). BankAccount deposits are accepted but bank accounts are not offered on the hosted payment page for now. Withdrawals: JazzCash, Easypaisa, TillID or BankAccount only; JazzCashTillID, JazzCashQR and EasypaisaQR are deposit-only and rejected with 400."
       },
       "Currency": {
         "type": "string",
@@ -511,7 +519,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Deposit: customer submitted payment. Withdrawal: member sent the payout."
+            "description": "Deposit: customer confirmed the payment on the hosted page. Withdrawal: member sent the payout."
           },
           "approvedAt": {
             "type": [
@@ -640,7 +648,8 @@
             "type": "integer",
             "minimum": 4,
             "maximum": 8,
-            "default": 4
+            "default": 4,
+            "description": "Deposits on account number and Till ID methods (JazzCash, JazzCashTillID, Easypaisa, TillID) only: how many trailing digits of the wallet transaction ID the customer enters on the hosted payment page. No effect on a payment made with JazzCashQR or EasypaisaQR, where no transaction ID is asked for: the customer gives their JazzCash account number (JazzCashQR) or the last 4 digits of their Easypaisa IBAN (EasypaisaQR) instead. No effect on withdrawals."
           },
           "maxRetryCount": {
             "type": "integer",
@@ -755,7 +764,7 @@
               "number",
               "null"
             ],
-            "description": "Merchant fee, fixed when the order was accepted (deposit: re-quoted if the customer pays with a different wallet type; capped at the deposit amount)."
+            "description": "Merchant fee, fixed when the order was accepted (deposit: re-quoted if the customer pays with a different payment method than requested; capped at the deposit amount)."
           },
           "stage": {
             "$ref": "#/components/schemas/OrderStage"

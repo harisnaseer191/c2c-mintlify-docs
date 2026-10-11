@@ -7,6 +7,8 @@ description: "How a C2C deposit moves from your API call to money in your mercha
 
 A deposit collects money from your customer. The customer pays a verified C2C **member** from their own mobile wallet, the member confirms receipt, and C2C credits your merchant wallet with the amount minus fees.
 
+The `walletType` you request is the [payment method](/guides/payment-methods): JazzCash or Easypaisa, by account number, Till ID or QR code. The customer is only ever given a receiving account of exactly that method.
+
 ## Flow diagram
 
 ```mermaid
@@ -24,11 +26,11 @@ sequenceDiagram
     C2C->>Member: Assign order (status Queued), or accept as Awaiting if no member is eligible
     C2C-->>Merchant: orderId, paymentPageUrl, status, stage
     Merchant-->>Customer: Redirect to paymentPageUrl
-    Customer->>Page: Open page (on the requested wallet)
+    Customer->>Page: Open page (on the requested payment method)
     Page->>C2C: Assign an online member now if the order is Awaiting
-    Page-->>Customer: Member account to pay (AwaitingCustomerPayment)
+    Page-->>Customer: Account number, Till ID or QR code to pay (AwaitingCustomerPayment)
     Customer->>Member: Send money from wallet app
-    Customer->>Page: Enter last digits of transaction ID (AwaitingMemberConfirmation)
+    Customer->>Page: Confirm the payment (AwaitingMemberConfirmation)
     Member->>C2C: Confirm receipt
     C2C->>C2C: Completed, credit merchant wallet (amount − fee)
     C2C-->>Merchant: Webhook order.completed
@@ -46,15 +48,15 @@ Your backend calls [Create Deposit Order](/api-reference/endpoints/create-deposi
 2. **Signature** (the body's `signature` field) valid, otherwise `401`. Deposits are always signature-enforced.
 3. **Request** valid, otherwise `400`
 4. **Merchant account** active and **IP whitelist** passed, otherwise `403`
-5. **Wallet channel** enabled for deposits on your account, otherwise `422`
+5. **Payment method** (`walletType`) enabled for deposits on your account, otherwise `422`
 6. **`merchantOrderRef`** not already used by an order that is in progress or completed, otherwise `409`. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
 
-C2C then looks for an **eligible member**: online, with an approved account for the wallet, a limit covering the amount, and enough balance to back the deposit.
+C2C then looks for an **eligible member**: online, with an approved receiving account of exactly the requested method, a limit covering the amount, and enough balance to back the deposit. No method falls back to another: `JazzCash` is never given a JazzCash Till ID or QR code, and never an Easypaisa account. See [Exact matching](/guides/payment-methods#exact-matching).
 
 - **Member found:** the order is created as `Queued` (stage `Assigned`) with the member already assigned, and the member is notified in their app.
 - **No member right now:** the order is still **accepted** (`200`) as `Awaiting` (stage `Awaiting`), with the usual `orderId`, `orderReference` and `paymentPageUrl`. A member is assigned when the customer opens the payment page.
 
-Your merchant fee is fixed when the order is accepted. It's re-quoted only if the customer pays with a different wallet type than you requested, and it's capped at the deposit amount, so the credit to your wallet is never negative. Later fee-rule changes apply to new orders only.
+Your merchant fee is fixed when the order is accepted. It's re-quoted only if the customer pays with a different method than you requested, and it's capped at the deposit amount, so the credit to your wallet is never negative. Later fee-rule changes apply to new orders only.
 
 ### 2. Redirect the customer
 
@@ -62,9 +64,18 @@ Send the customer to `paymentPageUrl` right away. The link is valid for **15 min
 
 ### 3. Customer pays
 
-The page opens on the wallet you requested. The customer sees the account to pay, sends the money from their wallet app, and enters the last digits of the transaction ID. The order moves `Queued` (or `Awaiting`) → `AwaitingCustomerPayment` → `AwaitingMemberConfirmation`.
+The page opens on the method you requested. The customer sees where to pay, sends the money from their wallet app, and confirms on the page. What they submit depends on the method:
 
-For an `Awaiting` order, an online member is assigned as soon as the customer opens the page, and their account is shown. If nobody is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds. The customer must not send money until an account is shown.
+| Method | The customer pays to | The customer submits |
+|--------|----------------------|----------------------|
+| `JazzCash`, `Easypaisa` | The account number shown | The last digits of the transaction ID |
+| `JazzCashTillID`, `TillID` | The Till ID shown | The last digits of the transaction ID |
+| `JazzCashQR` | The QR code shown | Their JazzCash account number, before the QR code is shown. No transaction ID. |
+| `EasypaisaQR` | The QR code shown | The last 4 digits of their Easypaisa IBAN, before the QR code is shown. No transaction ID. |
+
+The order moves `Queued` (or `Awaiting`) → `AwaitingCustomerPayment` → `AwaitingMemberConfirmation`. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
+
+For an `Awaiting` order, an online member with an account of the requested method is assigned as soon as the customer opens the page, and their account is shown. If none is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds. The customer must not send money until an account number, Till ID or QR code is shown.
 
 ### 4. Member confirms
 
@@ -87,7 +98,7 @@ stateDiagram-v2
     Awaiting --> CancelledTimeout: no member assigned before the link expired
     Queued --> AwaitingCustomerPayment: customer opens page
     Queued --> Expired: checkout link expired
-    AwaitingCustomerPayment --> AwaitingMemberConfirmation: customer submits transaction digits
+    AwaitingCustomerPayment --> AwaitingMemberConfirmation: customer confirms the payment on the page
     AwaitingCustomerPayment --> Expired: payment page expired
     AwaitingMemberConfirmation --> Completed: member confirms
     AwaitingMemberConfirmation --> Rejected: member rejects

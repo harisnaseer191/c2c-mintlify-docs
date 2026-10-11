@@ -73,7 +73,7 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
       Currency code, for example `PKR`.
     </ResponseField>
     <ResponseField name="fee" type="number | null">
-      Your merchant fee for this order, fixed when the order was accepted (for a deposit, re-quoted if the customer paid with a different wallet type than requested). `null` if no fee applies.
+      Your merchant fee for this order, fixed when the order was accepted (for a deposit, re-quoted if the customer paid with a different payment method than requested). `null` if no fee applies.
     </ResponseField>
     <ResponseField name="stage" type="string">
       Canonical lifecycle stage: `Awaiting`, `Assigned`, `Sent`, `Approved`, `Rejected`, `Completed` or `Failed`. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
@@ -85,7 +85,7 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
         <ResponseField name="createdAt" type="string">When the order was accepted.</ResponseField>
         <ResponseField name="awaitingAt" type="string | null">When the order started waiting for an eligible member (`null` if a member was assigned at creation).</ResponseField>
         <ResponseField name="assignedAt" type="string | null">When a member was assigned.</ResponseField>
-        <ResponseField name="sentAt" type="string | null">Deposit: when the customer submitted their payment. Withdrawal: when the member sent the payout.</ResponseField>
+        <ResponseField name="sentAt" type="string | null">Deposit: when the customer confirmed their payment on the payment page (with transaction ID digits, or on a QR method by tapping **I've Completed Payment**). Withdrawal: when the member sent the payout.</ResponseField>
         <ResponseField name="approvedAt" type="string | null">When the member approved the order.</ResponseField>
         <ResponseField name="rejectedAt" type="string | null">When the member rejected the order.</ResponseField>
         <ResponseField name="completedAt" type="string | null">When the order settled.</ResponseField>
@@ -98,24 +98,24 @@ Lookups are scoped to your merchant account, not to an API key: any of your acti
 <RequestExample>
 ```bash cURL (orderId)
 curl --request GET \
-  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/788fcae0-5214-403c-baa2-f318c0eb1b5b/status \
+  --url https://api.c2cpayment.net/api/merchant/orders/788fcae0-5214-403c-baa2-f318c0eb1b5b/status \
   --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
 ```bash cURL (orderReference)
 curl --request GET \
-  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/ORD-20261008120620-3f6b/status \
+  --url https://api.c2cpayment.net/api/merchant/orders/ORD-20261008120620-3f6b/status \
   --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
 ```bash cURL (merchantOrderRef)
 curl --request GET \
-  --url "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/status?merchantOrderRef=INV-10045" \
+  --url "https://api.c2cpayment.net/api/merchant/orders/status?merchantOrderRef=INV-10045" \
   --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
 ```javascript Node.js
-const BASE_URL = 'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io';
+const BASE_URL = 'https://api.c2cpayment.net';
 
 // Pass exactly one identifier: C2C's orderId or orderReference, or your merchantOrderRef.
 async function getOrderStatus({ orderId, orderReference, merchantOrderRef }) {
@@ -140,7 +140,7 @@ from urllib.parse import quote
 
 import requests
 
-BASE_URL = "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io"
+BASE_URL = "https://api.c2cpayment.net"
 
 
 def get_order_status(*, order_id=None, order_reference=None, merchant_order_ref=None) -> dict:
@@ -263,9 +263,9 @@ get_order_status(merchant_order_ref="INV-10045")
 | Status | Applies to | Meaning | Final? |
 |--------|-----------|---------|--------|
 | `Awaiting` | Both | Accepted, waiting for an eligible member. Deposit: a member is assigned when the customer opens the payment page; if none is assigned before the checkout link expires (15 minutes), it ends `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available, or `CancelledTimeout` after 120 minutes. A withdrawal created without `customerAccountNumber` first waits here for the customer to enter their account on the hosted page (`CancelledTimeout` if they haven't within 15 minutes). | No |
-| `Queued` | Deposit | Created with a member assigned. The customer hasn't chosen a wallet on the payment page yet. | No |
-| `AwaitingCustomerPayment` | Deposit | Wallet chosen and account shown. Waiting for the customer to pay and submit the transaction digits. | No |
-| `AwaitingMemberConfirmation` | Deposit | Customer submitted payment. Waiting for the member to verify receipt. | No |
+| `Queued` | Deposit | Created with a member assigned. The customer hasn't opened the payment page yet, or hasn't picked a method on it. | No |
+| `AwaitingCustomerPayment` | Deposit | Payment page opened and the account number, Till ID or QR code reserved for the customer. Waiting for the customer to pay and confirm on the page: the last digits of the transaction ID, or on the QR methods the account they pay from. | No |
+| `AwaitingMemberConfirmation` | Deposit | Customer confirmed the payment on the page. Waiting for the member to verify receipt. | No |
 | `AwaitingMemberPayout` | Withdrawal | Waiting for the member to send the payout. | No |
 | `ManualReview` | Both | Escalated to C2C operations, for example a member confirmation or payout window passed, or the member reported that a payout could not be completed normally. Resolved by C2C to `Completed` or `Cancelled`, which sends `order.completed` or `order.failed`. Stage `Sent` if the customer had already paid, otherwise `Assigned`. | No |
 | `Completed` | Both | **Success.** Funds received (deposit) or paid out (withdrawal). | **Yes, success** |
@@ -335,7 +335,7 @@ Send **one** of the two parameters.
 
 ```bash cURL
 curl --request GET \
-  --url "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/status?merchantOrderRef=INV-10045" \
+  --url "https://api.c2cpayment.net/api/merchant/orders/status?merchantOrderRef=INV-10045" \
   --header "C2C-API-Key: $C2C_API_KEY"
 ```
 

@@ -203,7 +203,7 @@ public static class C2CSigner
 }
 
 // Usage: create a deposit order
-var baseUrl = "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io";
+var baseUrl = "https://api.c2cpayment.net";
 var payload = new JsonObject
 {
     ["orderType"] = "Deposit",
@@ -245,7 +245,7 @@ function signBody(payload, signingSecret) {
 }
 
 // Usage: create a deposit order (Node 18+ global fetch)
-const baseUrl = 'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io';
+const baseUrl = 'https://api.c2cpayment.net';
 const payload = {
   orderType: 'Deposit',
   amount: 1500,
@@ -289,7 +289,7 @@ def sign_body(payload: dict, signing_secret: str) -> str:
 
 
 # Usage: create a deposit order
-base_url = "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io"
+base_url = "https://api.c2cpayment.net"
 payload = {
     "orderType": "Deposit",
     "amount": 1500,

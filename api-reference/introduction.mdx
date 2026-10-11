@@ -5,7 +5,7 @@ description: 'Reference for the C2C Merchant API — create deposit and withdraw
 
 ## Welcome to the C2C Merchant API
 
-The C2C Merchant API lets your backend accept **deposits** from and send **withdrawals** to customers' Pakistani mobile wallets, without integrating with each wallet provider yourself. C2C routes every order to a verified member who holds an account with the same provider. The member receives the customer's payment (deposit) or sends the payout (withdrawal) and confirms it, and C2C settles the result to your merchant wallet.
+The C2C Merchant API lets your backend accept **deposits** from and send **withdrawals** to customers' Pakistani mobile wallets, without integrating with each wallet provider yourself. C2C routes every order to a verified member who holds a matching account: for a deposit, an account of exactly the requested [payment method](/guides/payment-methods); for a withdrawal, an account with the customer's provider. The member receives the customer's payment (deposit) or sends the payout (withdrawal) and confirms it, and C2C settles the result to your merchant wallet.
 
 The API is REST over HTTPS with JSON request and response bodies, and uses standard HTTP status codes.
 
@@ -16,7 +16,7 @@ The API is REST over HTTPS with JSON request and response bodies, and uses stand
 ## Base URL
 
 ```
-https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io
+https://api.c2cpayment.net
 ```
 
 All paths in this reference are relative to the base URL, for example `POST /api/merchant/orders`.
@@ -25,8 +25,8 @@ All paths in this reference are relative to the base URL, for example `POST /api
 
 | Environment | Base URL | Notes |
 |-------------|----------|-------|
+| Production | `https://api.c2cpayment.net` | Live payments. Used by every example in this reference |
 | Development / integration | `https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io` | Use while building and testing your integration |
-| Production | Provided by C2C during onboarding | Issued together with your production API key |
 
 <Warning>
   API keys and signing secrets are issued **per environment**. A key from one environment will be rejected by another. There is no separate test-key prefix: every key starts with `mk_live_`.
@@ -73,21 +73,26 @@ Deposits and withdrawals share a single endpoint. The `orderType` field decides 
   **Not part of the C2C API:** refunds, settlements, hosted checkout as a separate endpoint, and direct wallet charging (OTP/token). Hosted checkout is built into deposits: every deposit returns a `paymentPageUrl`. See [Hosted payment page](/guides/hosted-payment-page).
 </Info>
 
-## Supported wallets and currencies
+## Supported payment methods and currencies
 
-| `walletType` | Description |
-|--------------|-------------|
-| `JazzCash` | JazzCash mobile wallet |
-| `Easypaisa` | Easypaisa mobile wallet |
-| `TillID` | Till ID (QR / merchant till) |
-| `BankAccount` | Bank account transfer |
+`walletType` names one payment method: a provider and what the customer pays to. A deposit is matched only with a receiving account of exactly that method. See [Payment methods](/guides/payment-methods).
+
+| `walletType` | Method | Deposits | Withdrawals |
+|--------------|--------|----------|-------------|
+| `JazzCash` | JazzCash account number | Yes | Yes |
+| `JazzCashTillID` | JazzCash Till ID | Yes | No |
+| `JazzCashQR` | JazzCash QR code | Yes | No |
+| `Easypaisa` | Easypaisa account number | Yes | Yes |
+| `TillID` | Easypaisa Till ID | Yes | Yes |
+| `EasypaisaQR` | Easypaisa QR code | Yes | No |
+| `BankAccount` | Bank account | Accepted, but not offered on the hosted payment page for now | Yes |
 
 | `currency` | Notes |
 |------------|-------|
 | `PKR` | Default when omitted |
 | `INR`, `BDT` | Accepted by the API. An order succeeds only when members are available in that currency. |
 
-Which wallets are enabled for deposits and withdrawals is configured **per merchant**. If a channel is disabled for your account, order creation returns `422`.
+Which methods are enabled for deposits and withdrawals is configured **per merchant**. If a method is disabled for your account, order creation returns `422`. A withdrawal on a deposit-only method returns `400`.
 
 ## Request and response format
 

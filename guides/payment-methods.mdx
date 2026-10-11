@@ -1,0 +1,130 @@
+---
+title: "Payment Methods"
+description: "The six deposit payment methods, the walletType for each, how C2C matches a receiving account, and what your customer submits on the payment page."
+---
+
+## Overview
+
+The `walletType` of an order names one **payment method**: a provider (JazzCash or Easypaisa) and what the customer pays to (an account number, a Till ID or a QR code). A deposit is only ever given a receiving account of exactly the method you requested.
+
+## Deposit methods
+
+| `walletType` | Method | The customer pays to | The customer submits on the payment page |
+|--------------|--------|----------------------|------------------------------------------|
+| `JazzCash` | JazzCash account number | A JazzCash account number | The last digits of the transaction ID (TID) |
+| `JazzCashTillID` | JazzCash Till ID | A JazzCash Till ID | The last digits of the TID |
+| `JazzCashQR` | JazzCash QR | The member's JazzCash QR code, which they scan | Their own JazzCash account number (`03XXXXXXXXX`) |
+| `Easypaisa` | Easypaisa account number | An Easypaisa account number | The last digits of the TID |
+| `TillID` | Easypaisa Till ID | An Easypaisa Till ID | The last digits of the TID |
+| `EasypaisaQR` | Easypaisa QR | The member's Easypaisa QR code, which they scan | The last 4 digits of their own Easypaisa IBAN |
+
+`JazzCashTillID`, `JazzCashQR` and `EasypaisaQR` are new values. `TillID` keeps its name and means an **Easypaisa** Till ID, as before.
+
+<Note>
+  `BankAccount` is still a valid `walletType`: it is used for [withdrawals](#withdrawals), and a deposit can be created with it. Bank accounts aren't offered on the hosted payment page for now, though. The payment link of a `BankAccount` deposit opens on the list of available methods, and the customer pays with one of the six methods above.
+</Note>
+
+## Exact matching
+
+A deposit requested on a `walletType` is assigned only to a member who has a receiving account of **exactly that method**. No method falls back to another one, and never to another provider.
+
+<Warning>
+  **Changed behaviour.** `JazzCash` and `Easypaisa` used to cover the provider's Till IDs as well. They now mean the account number only.
+</Warning>
+
+| You request | Before | Now |
+|-------------|--------|-----|
+| `JazzCash` | A JazzCash account number **or** a JazzCash Till ID | A JazzCash account number only |
+| `Easypaisa` | An Easypaisa account number **or** an Easypaisa Till ID | An Easypaisa account number only |
+| `TillID` | An Easypaisa Till ID | Unchanged |
+| `JazzCashTillID` | Not available | A JazzCash Till ID only |
+| `JazzCashQR` | Not available | A JazzCash QR code only |
+| `EasypaisaQR` | Not available | An Easypaisa QR code only |
+
+### If you already integrate
+
+- Requests you send today keep working: `JazzCash`, `Easypaisa`, `TillID` and `BankAccount` are accepted as before, and the request and response fields are unchanged.
+- If you relied on `JazzCash` reaching JazzCash Till IDs, request `JazzCashTillID` for those payments.
+- If you relied on `Easypaisa` reaching Easypaisa Till IDs, request `TillID` for those payments.
+- To let customers pay by QR code, request `JazzCashQR` or `EasypaisaQR`.
+- If your code validates `walletType` against a fixed list, add `JazzCashTillID`, `JazzCashQR` and `EasypaisaQR`.
+
+### When no account of the method is available
+
+The order is accepted as `Awaiting`, exactly as before. C2C waits for a member with a receiving account of the requested method and doesn't substitute another method. When the customer opens the payment page it shows **"Finding an available agent…"** and re-checks every 10 seconds. If no member is assigned before the link expires, the order ends `CancelledTimeout`. See the [Deposit flow](/guides/deposit-flow).
+
+### When the customer changes the method
+
+Once the page shows where to pay, the customer can tap **Change** and pick another method. The page lists only the methods that are enabled for your account and available for that order, so it can show fewer than six. The order is then paid on the method they picked: what they submit follows that method, and your fee is re-quoted for it.
+
+## What the customer submits
+
+What the customer submits on the [hosted payment page](/guides/hosted-payment-page) depends on the method. There is no single rule for all deposits.
+
+### Account number and Till ID methods
+
+`JazzCash`, `JazzCashTillID`, `Easypaisa` and `TillID`.
+
+The customer pays the account number or Till ID shown, then enters the **last digits of the transaction ID** (TID) of that payment. `txnRefDigitsRequired` on the order sets how many digits: `4` to `8`, `4` by default.
+
+### QR methods
+
+`JazzCashQR` and `EasypaisaQR`. These methods have no transaction ID step, and `txnRefDigitsRequired` has no effect on them.
+
+Before the QR code is shown, the customer gives the **account they pay from**:
+
+| Method | The customer enters |
+|--------|---------------------|
+| `JazzCashQR` | Their JazzCash account number: 11 digits starting with `03`, for example `03001234567`. `+92…` is accepted and normalised. |
+| `EasypaisaQR` | The last 4 digits of their Easypaisa IBAN |
+
+They then scan the QR code, pay, and tap **I've Completed Payment**. The assigned member uses the account the customer gave to find the incoming payment.
+
+<Note>
+  In every case, what the customer submits is their claim, not proof. The order completes only when the member confirms that the money arrived. Neither the transaction ID digits nor the account a customer pays from is returned by the Merchant API or sent in webhooks.
+</Note>
+
+## Withdrawals
+
+Withdrawals are unchanged. A withdrawal's `walletType` must be one of `JazzCash`, `Easypaisa`, `TillID` or `BankAccount`.
+
+`JazzCashTillID`, `JazzCashQR` and `EasypaisaQR` are deposit-only. A withdrawal on one of them is rejected with `400`:
+
+```json
+{
+  "error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, TillID, BankAccount."
+}
+```
+
+## Enabling methods
+
+C2C switches each method on or off **per merchant**, separately for deposits and withdrawals. Creating an order on a method that is disabled for your account returns `422`, for example `JazzCashQR deposits are disabled for this merchant.` A disabled method isn't offered on the payment page either.
+
+If JazzCash deposits were switched off for your account before the new methods were added, `JazzCashTillID` and `JazzCashQR` deposits start switched off too. The same applies to Easypaisa and `EasypaisaQR`. Ask C2C to enable the methods you want to use.
+
+## Fees
+
+Your fee rules are configured by C2C per order type and method. A new method that has no rule of its own is priced by its provider's rule:
+
+- A rule for `JazzCash` also prices `JazzCashTillID` and `JazzCashQR` deposits.
+- A rule for `Easypaisa` also prices `EasypaisaQR` deposits.
+- `TillID` keeps its own rules. It isn't priced by the `Easypaisa` rule.
+
+Among your account's rules, one for the exact method takes precedence over the provider's rule. The fee is fixed when the order is accepted and re-quoted only if the customer pays with a different method than you requested.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Create a deposit" icon="arrow-down-to-line" href="/api-reference/endpoints/create-deposit">
+    Request a method with `walletType`
+  </Card>
+  <Card title="Hosted payment page" icon="window-maximize" href="/guides/hosted-payment-page">
+    What your customer sees for each method
+  </Card>
+  <Card title="Deposit flow" icon="diagram-project" href="/guides/deposit-flow">
+    Full lifecycle, statuses and timeouts
+  </Card>
+  <Card title="Errors" icon="triangle-exclamation" href="/api-reference/errors">
+    Disabled methods and deposit-only methods
+  </Card>
+</CardGroup>

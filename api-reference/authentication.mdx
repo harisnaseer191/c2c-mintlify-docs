@@ -56,13 +56,13 @@ Deposit and withdrawal requests also carry a `signature` field **in the JSON bod
 <CodeGroup>
 ```bash cURL
 curl --request GET \
-  --url https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance \
+  --url https://api.c2cpayment.net/api/merchant/orders/balance \
   --header "C2C-API-Key: $C2C_API_KEY"
 ```
 
 ```javascript Node.js
 const response = await fetch(
-  'https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance',
+  'https://api.c2cpayment.net/api/merchant/orders/balance',
   { headers: { 'C2C-API-Key': process.env.C2C_API_KEY } }
 );
 console.log(response.status, await response.json());
@@ -73,7 +73,7 @@ import os
 import requests
 
 response = requests.get(
-    "https://ca-c2c-dev-api.calmsea-c64629ed.uaenorth.azurecontainerapps.io/api/merchant/orders/balance",
+    "https://api.c2cpayment.net/api/merchant/orders/balance",
     headers={"C2C-API-Key": os.environ["C2C_API_KEY"]},
 )
 print(response.status_code, response.json())
@@ -143,7 +143,7 @@ Besides the API key and signature, C2C applies these checks when you create an o
 |-------|----------------------|
 | Merchant account is **Active** | `403`: `Merchant account is suspended; new orders are not accepted.` |
 | **IP whitelist**, if C2C has enabled one for your account (Deposit / Withdrawal scope) | `403`: `IP not in whitelist.` |
-| Wallet **channel enabled** for your account and order type | `422`: `JazzCash deposits are disabled for this merchant.` |
+| Payment method (`walletType`) **enabled** for your account and order type | `422`: `JazzCash deposits are disabled for this merchant.` |
 
 ## Authentication errors
 

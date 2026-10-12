@@ -56,7 +56,7 @@ You can give the customer's receiving account in two ways:
 <ParamField body="walletType" type="string" required>
   The type of the customer's receiving account. C2C assigns a member who can pay out to it: a payout is sent within one provider, so a JazzCash customer is paid by a member with a JazzCash account and an Easypaisa customer by a member with an Easypaisa account. The wallet type is fixed by the order: on the hosted page the customer enters an account of this type and cannot choose another.
 
-  One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`.
+  One of `JazzCash`, `Easypaisa`, `EasypaisaTillID`, `BankAccount`. The earlier name `TillID` is no longer accepted: send `EasypaisaTillID`.
 
   `JazzCashTillID`, `JazzCashQR` and `EasypaisaQR` are deposit-only [payment methods](/guides/payment-methods): a withdrawal on one of them is rejected with `400`.
 </ParamField>
@@ -109,8 +109,8 @@ You can give the customer's receiving account in two ways:
   Absolute `http(s)` URL. The hosted page sends the customer here when the withdrawal is rejected, cancelled or expires.
 </ParamField>
 
-<ParamField body="txnRefDigitsRequired" type="integer" default="4">
-  Accepted (`4` to `8`), but it has no effect on a withdrawal. It is only used by the deposit payment page, for the account number and Till ID methods.
+<ParamField body="txnRefDigitsRequired" type="integer" default="4" deprecated>
+  **Deprecated: accepted, but ignored.** Accepted (`4` to `8`) so that existing integrations don't break. It has no effect on a withdrawal, and it is no longer used for deposits either.
 </ParamField>
 
 <ParamField body="signature" type="string" required>
@@ -268,7 +268,7 @@ order_id = response.json()["data"]["orderId"]
 
 ```json 400 Deposit-only method
 {
-  "error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, TillID, BankAccount."
+  "error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, EasypaisaTillID, BankAccount."
 }
 ```
 
@@ -305,7 +305,7 @@ order_id = response.json()["data"]["orderId"]
 | Status | When | Body |
 |--------|------|------|
 | `400` | Validation failed, for example `customerAccountNumber` too long, `customerAccountName` sent without an account number, amount ≤ 0, an amount with more than 4 decimal places or too large, or an unknown currency | `{"error": "..."}` |
-| `400` | `walletType` is `JazzCashTillID`, `JazzCashQR` or `EasypaisaQR`, which are deposit-only | `{"error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, TillID, BankAccount."}` |
+| `400` | `walletType` is `JazzCashTillID`, `JazzCashQR` or `EasypaisaQR`, which are deposit-only | `{"error": "JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, EasypaisaTillID, BankAccount."}` |
 | `400` | `Idempotency-Key` missing, malformed JSON, or an unknown enum value | `application/problem+json` |
 | `401` | API key missing, invalid or revoked | Empty body |
 | `401` | `signature` missing, malformed, invalid, or replayed under a different `Idempotency-Key` | `{"success": false, "error", "code", "traceId"}` |
@@ -344,7 +344,7 @@ Fees come from the fee rules C2C configures for your account. The fee is **fixed
 When no eligible member is available, the withdrawal is accepted with status `Awaiting` (stage `Awaiting`). It's assigned automatically as soon as a member becomes available: a member comes online, a member frees capacity, or C2C's once-a-minute background check finds one. It then continues as `AwaitingMemberPayout`.
 
 - While `Awaiting`, its **amount + fee stays reserved** against your balance: it counts as in progress for the funding check and for the Pending amount on your dashboard.
-- If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout` and you receive an `order.failed` webhook (`reason`: `No eligible member became available in time`). Nothing is debited.
+- If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout` and you receive an `order.failed` webhook (`reason`: `Failed to assign the order to a member. Please check with support.`). Nothing is debited.
 
 ## Collecting the account on the hosted page
 

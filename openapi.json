@@ -42,7 +42,7 @@
         ],
         "operationId": "createOrder",
         "summary": "Create a deposit or withdrawal order",
-        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer, who is given a receiving account of exactly the requested walletType (payment method); orderType=Withdrawal pays the customer's account (customerAccountNumber, or entered by the customer on the hosted page when omitted) and accepts walletType JazzCash, Easypaisa, TillID or BankAccount only. Orders are always accepted: when no eligible member is available the order is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key → 401 SIGNATURE_REPLAYED.",
+        "description": "orderType=Deposit returns a hosted paymentPageUrl for the customer, who first enters the wallet account they pay from there and is then given a receiving account of exactly the requested walletType (payment method); orderType=Withdrawal pays the customer's account (customerAccountNumber, or entered by the customer on the hosted page when omitted) and accepts walletType JazzCash, Easypaisa, EasypaisaTillID or BankAccount only. Orders are always accepted. A deposit is always created with status Queued and stage Awaiting: no member is assigned at creation, only when the customer submits the account they pay from on the hosted page (if none can be assigned within about 10 seconds of that, the order fails with CancelledTimeout). A withdrawal with no eligible member available is created with status Awaiting (stage Awaiting) and assigned later. merchantOrderRef allows one live (in progress or completed) order per merchant. The body must carry a valid 'signature' (always enforced). Retrying the same signed body with the same Idempotency-Key is safe; the same signed body under a different Idempotency-Key → 401 SIGNATURE_REPLAYED.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -89,7 +89,7 @@
         },
         "responses": {
           "200": {
-            "description": "Order created (status Queued/AwaitingMemberPayout, or Awaiting when no eligible member is available yet), or the existing order for a repeated Idempotency-Key with the same terms.",
+            "description": "Order created, or the existing order for a repeated Idempotency-Key with the same terms. A new deposit always has status Queued and stage Awaiting (no member assigned yet). A new withdrawal has status AwaitingMemberPayout (stage Assigned), or Awaiting (stage Awaiting) when no eligible member is available yet or the customer still has to enter their account on the hosted page.",
             "content": {
               "application/json": {
                 "schema": {
@@ -100,6 +100,50 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CreateOrderResponse"
+                    }
+                  }
+                },
+                "examples": {
+                  "deposit": {
+                    "summary": "Deposit (always Queued, stage Awaiting)",
+                    "value": {
+                      "data": {
+                        "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
+                        "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...&wallet=jazzcash",
+                        "status": "Queued",
+                        "orderReference": "ORD-20261008120620-3f6b",
+                        "expiresAt": "2026-10-08T12:21:20.605646Z",
+                        "stage": "Awaiting",
+                        "merchantOrderRef": "INV-10045"
+                      }
+                    }
+                  },
+                  "withdrawal": {
+                    "summary": "Withdrawal, member assigned",
+                    "value": {
+                      "data": {
+                        "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+                        "paymentPageUrl": "https://<payment-page-host>/pay?order_id=d1926af5-053d-4b39-a73b-c82f0d9af656&expires=1791462081&signature=Pq7...",
+                        "status": "AwaitingMemberPayout",
+                        "orderReference": "ORD-20261008120621-a7b8",
+                        "expiresAt": "2026-10-08T12:21:21.717975Z",
+                        "stage": "Assigned",
+                        "merchantOrderRef": "PAYOUT-20017"
+                      }
+                    }
+                  },
+                  "withdrawalAwaiting": {
+                    "summary": "Withdrawal, awaiting a member",
+                    "value": {
+                      "data": {
+                        "orderId": "d1926af5-053d-4b39-a73b-c82f0d9af656",
+                        "paymentPageUrl": "https://<payment-page-host>/pay?order_id=d1926af5-053d-4b39-a73b-c82f0d9af656&expires=1791462081&signature=Pq7...",
+                        "status": "Awaiting",
+                        "orderReference": "ORD-20261008120621-a7b8",
+                        "expiresAt": "2026-10-08T12:21:21.717975Z",
+                        "stage": "Awaiting",
+                        "merchantOrderRef": "PAYOUT-20017"
+                      }
                     }
                   }
                 }
@@ -431,13 +475,13 @@
         "enum": [
           "JazzCash",
           "Easypaisa",
-          "TillID",
+          "EasypaisaTillID",
           "BankAccount",
           "JazzCashTillID",
           "JazzCashQR",
           "EasypaisaQR"
         ],
-        "description": "The payment method. JazzCash = JazzCash account number; JazzCashTillID = JazzCash Till ID; JazzCashQR = JazzCash QR code; Easypaisa = Easypaisa account number; TillID = Easypaisa Till ID; EasypaisaQR = Easypaisa QR code; BankAccount = bank account. Deposits: the customer is only ever given a receiving account of exactly the requested method (JazzCash and Easypaisa mean the account number only; request JazzCashTillID or TillID for a Till ID). BankAccount deposits are accepted but bank accounts are not offered on the hosted payment page for now. Withdrawals: JazzCash, Easypaisa, TillID or BankAccount only; JazzCashTillID, JazzCashQR and EasypaisaQR are deposit-only and rejected with 400."
+        "description": "The payment method. JazzCash = JazzCash account number; JazzCashTillID = JazzCash Till ID; JazzCashQR = JazzCash QR code; Easypaisa = Easypaisa account number; EasypaisaTillID = Easypaisa Till ID (named TillID before; TillID is no longer accepted); EasypaisaQR = Easypaisa QR code; BankAccount = bank account. Deposits: the customer is only ever given a receiving account of exactly the requested method (JazzCash and Easypaisa mean the account number only; request JazzCashTillID or EasypaisaTillID for a Till ID). BankAccount deposits are accepted but bank accounts are not offered on the hosted payment page for now. Withdrawals: JazzCash, Easypaisa, EasypaisaTillID or BankAccount only; JazzCashTillID, JazzCashQR and EasypaisaQR are deposit-only and rejected with 400."
       },
       "Currency": {
         "type": "string",
@@ -467,7 +511,7 @@
           "Frozen",
           "Confirmed"
         ],
-        "description": "Final success: Completed (legacy Confirmed). Final failure: Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto. Others are in progress (Awaiting = accepted, waiting for an eligible member)."
+        "description": "Final success: Completed (legacy Confirmed). Final failure: Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto. Others are in progress. Deposit path: Queued (created; the customer has not submitted the account they pay from; no member assigned) → Awaiting (only while a member is looked for, at most about 10 seconds) → AwaitingCustomerPayment (member assigned and account shown; waiting for the payment to arrive and the member to confirm it) → Completed. Deposit failures: CancelledTimeout (no member could be assigned within the 10 seconds), Expired (the checkout link expired before the customer started or before the member confirmed a payment), Rejected (the member reports that the payment did not arrive). AwaitingMemberConfirmation is no longer entered by new deposits; it remains for orders created before this release, where the customer reported the payment on the hosted page. Withdrawal: Awaiting = accepted, waiting for an eligible member or for the customer's account; AwaitingMemberPayout = member assigned."
       },
       "OrderStage": {
         "type": "string",
@@ -480,7 +524,7 @@
           "Completed",
           "Failed"
         ],
-        "description": "Canonical lifecycle stage: Awaiting → Assigned → Sent → Approved / Rejected → Completed / Failed. Approved/Rejected currently happen in the same step as Completed/Failed, so the current stage is normally one of the other five."
+        "description": "Canonical lifecycle stage: Awaiting → Assigned → Sent → Approved / Rejected → Completed / Failed. Approved/Rejected currently happen in the same step as Completed/Failed, so the current stage is normally one of the other five. Status to stage: Awaiting, and Queued while no member is assigned (every new deposit) → Awaiting; AwaitingCustomerPayment, AwaitingMemberPayout → Assigned; Completed → Completed; Rejected, Expired, CancelledTimeout, Cancelled, CancelledAuto → Failed. A deposit normally goes straight from Assigned to Completed."
       },
       "OrderLifecycle": {
         "type": "object",
@@ -503,7 +547,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When the order started waiting for an eligible member."
+            "description": "When the order started waiting for an eligible member. Null if a member was assigned at creation, which only happens for withdrawals."
           },
           "assignedAt": {
             "type": [
@@ -511,7 +555,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When a member was assigned."
+            "description": "When a member was assigned. Deposit: after the customer submitted the account they pay from on the hosted page."
           },
           "sentAt": {
             "type": [
@@ -519,7 +563,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Deposit: customer confirmed the payment on the hosted page. Withdrawal: member sent the payout."
+            "description": "Deposit: the member confirmed that the payment arrived; the same timestamp as approvedAt and completedAt (orders created before this release: when the customer reported the payment on the hosted page). Withdrawal: member sent the payout."
           },
           "approvedAt": {
             "type": [
@@ -649,7 +693,8 @@
             "minimum": 4,
             "maximum": 8,
             "default": 4,
-            "description": "Deposits on account number and Till ID methods (JazzCash, JazzCashTillID, Easypaisa, TillID) only: how many trailing digits of the wallet transaction ID the customer enters on the hosted payment page. No effect on a payment made with JazzCashQR or EasypaisaQR, where no transaction ID is asked for: the customer gives their JazzCash account number (JazzCashQR) or the last 4 digits of their Easypaisa IBAN (EasypaisaQR) instead. No effect on withdrawals."
+            "deprecated": true,
+            "description": "Deprecated: accepted (4 to 8) so existing integrations do not break, but ignored. It used to set how many trailing digits of the wallet transaction ID the customer entered on the hosted payment page; the page no longer asks for a transaction ID on any payment method. No effect on withdrawals."
           },
           "maxRetryCount": {
             "type": "integer",
@@ -682,10 +727,11 @@
           "paymentPageUrl": {
             "type": "string",
             "format": "uri",
-            "description": "Hosted page for the order. Deposits: the customer pays there. Withdrawals: the customer enters their receiving account there when the order was created without one, and can follow the payout. Pre-signed; expires at expiresAt."
+            "description": "Hosted page for the order. Deposits: the customer enters the wallet account they pay from, is assigned a member's account and pays there. Withdrawals: the customer enters their receiving account there when the order was created without one, and can follow the payout. Pre-signed; expires at expiresAt."
           },
           "status": {
-            "$ref": "#/components/schemas/OrderStatus"
+            "$ref": "#/components/schemas/OrderStatus",
+            "description": "Initial status. Deposit: always Queued (no member assigned yet). Withdrawal: AwaitingMemberPayout when a member was assigned, or Awaiting when no eligible member was available yet or the customer still has to enter their account on the hosted page."
           },
           "orderReference": {
             "type": "string",
@@ -696,7 +742,8 @@
             "format": "date-time"
           },
           "stage": {
-            "$ref": "#/components/schemas/OrderStage"
+            "$ref": "#/components/schemas/OrderStage",
+            "description": "Initial lifecycle stage. Deposit: always Awaiting. Withdrawal: Assigned or Awaiting."
           },
           "merchantOrderRef": {
             "type": [

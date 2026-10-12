@@ -8,9 +8,13 @@ description: "Create a deposit order and get a hosted payment page URL where you
 
 Creates a **deposit**: your customer pays money into an account held by a C2C member, and the amount, minus fees, is credited to your merchant wallet once the member confirms receipt.
 
-C2C assigns an available member when the order is created and returns a `paymentPageUrl`. Redirect your customer to that hosted page. It opens on the [payment method](/guides/payment-methods) you requested in `walletType`: the customer sees the account number, Till ID or QR code to pay, sends the money from their wallet app, and confirms the payment on the page. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
+C2C creates the order and returns a `paymentPageUrl`. Redirect your customer to that hosted page. It opens on the [payment method](/guides/payment-methods) you requested in `walletType`: the customer enters the wallet account they will pay from, C2C assigns a member, and the page shows the account number, Till ID or QR code to pay. The customer sends the money from their wallet app, and the member confirms the order when the payment arrives. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
 
-The order is **always accepted**. If no eligible member is available right now, it's created with status `Awaiting`, and a member is assigned when the customer opens the payment page.
+The order is **always accepted** with status `Queued` and stage `Awaiting`. **No member is assigned when the order is created**: a member is assigned only when the customer submits the account they pay from on the payment page, so a customer who opens the link and leaves never occupies a member.
+
+<Warning>
+  **Changed behaviour.** A deposit used to be answered with `Queued` (stage `Assigned`) when a member was already assigned, or `Awaiting` when none was available. It is now always `Queued` with stage `Awaiting`. If your code treats `Queued` as "member assigned", or expects stage `Assigned` in the create response, update it. `txnRefDigitsRequired` is deprecated and no longer used.
+</Warning>
 
 | | |
 |---|---|
@@ -51,7 +55,7 @@ The order is **always accepted**. If no eligible member is available right now, 
 <ParamField body="walletType" type="string" required>
   The [payment method](/guides/payment-methods) the customer pays with. C2C assigns a member with a receiving account of **exactly this method**, and the payment page opens directly on it.
 
-  One of `JazzCash`, `JazzCashTillID`, `JazzCashQR`, `Easypaisa`, `TillID`, `EasypaisaQR`, `BankAccount`.
+  One of `JazzCash`, `JazzCashTillID`, `JazzCashQR`, `Easypaisa`, `EasypaisaTillID`, `EasypaisaQR`, `BankAccount`. The earlier name `TillID` is no longer accepted: send `EasypaisaTillID`.
 
   | Value | The customer pays to |
   |-------|----------------------|
@@ -59,11 +63,11 @@ The order is **always accepted**. If no eligible member is available right now, 
   | `JazzCashTillID` | A JazzCash Till ID |
   | `JazzCashQR` | A JazzCash QR code |
   | `Easypaisa` | An Easypaisa account number |
-  | `TillID` | An Easypaisa Till ID |
+  | `EasypaisaTillID` | An Easypaisa Till ID |
   | `EasypaisaQR` | An Easypaisa QR code |
   | `BankAccount` | Accepted, but bank accounts aren't offered on the payment page for now: the page opens on the list of available methods and the customer picks one of the six above. |
 
-  No method falls back to another. `JazzCash` and `Easypaisa` mean the account number only: request `JazzCashTillID` or `TillID` for a Till ID. If no account of the requested method is available, the order is accepted as `Awaiting`. On the payment page the customer can still switch to another method that is enabled for you.
+  No method falls back to another. `JazzCash` and `Easypaisa` mean the account number only: request `JazzCashTillID` or `EasypaisaTillID` for a Till ID. The order is accepted whether or not an account of the requested method is available right now: a member is looked for when the customer submits the account they pay from. On the payment page the customer can still switch to another method that is enabled for you, before they submit their account.
 </ParamField>
 
 <ParamField body="currency" type="string" default="PKR">
@@ -100,10 +104,10 @@ The order is **always accepted**. If no eligible member is available right now, 
   Free-form string, for example JSON-encoded, stored with the order for reconciliation. Up to 1000 characters. It isn't returned in API responses or webhooks.
 </ParamField>
 
-<ParamField body="txnRefDigitsRequired" type="integer" default="4">
-  `4` to `8`. Applies to the account number and Till ID methods only (`JazzCash`, `JazzCashTillID`, `Easypaisa`, `TillID`): how many trailing digits of the wallet transaction ID the customer enters on the payment page.
+<ParamField body="txnRefDigitsRequired" type="integer" default="4" deprecated>
+  **Deprecated: accepted, but ignored.** It used to set how many trailing digits of the wallet transaction ID the customer entered on the payment page. The page no longer asks for a transaction ID on any method, so the value has no effect.
 
-  It has no effect on a payment made with `JazzCashQR` or `EasypaisaQR`. Those methods don't ask for a transaction ID: the customer gives their JazzCash account number (`JazzCashQR`) or the last 4 digits of their Easypaisa IBAN (`EasypaisaQR`) instead. See [What the customer submits](/guides/payment-methods#what-the-customer-submits).
+  The field is still accepted so that existing integrations don't break: `4` to `8`, `4` by default. You can stop sending it. See [What the customer submits](/guides/payment-methods#what-the-customer-submits).
 </ParamField>
 
 <ParamField body="maxRetryCount" type="integer" default="3">
@@ -127,10 +131,10 @@ The order is **always accepted**. If no eligible member is available right now, 
       Hosted payment page for this order. Redirect the customer here. The URL is pre-signed and stops working at `expiresAt`. Don't modify it, and don't expose it to anyone other than the paying customer.
     </ResponseField>
     <ResponseField name="status" type="string">
-      Initial status: `Queued` when a member was assigned, or `Awaiting` when no eligible member was available yet. See [Order status](/guides/order-status).
+      Initial status: always `Queued` for a new deposit. The order is created, the customer hasn't started on the payment page, and no member is assigned yet. See [Order status](/guides/order-status).
     </ResponseField>
     <ResponseField name="stage" type="string">
-      Lifecycle stage: `Assigned` or `Awaiting` for a new deposit. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
+      Lifecycle stage: always `Awaiting` for a new deposit, because no member is assigned yet. See [Lifecycle stages](/guides/order-status#lifecycle-stages).
     </ResponseField>
     <ResponseField name="merchantOrderRef" type="string | null">
       Your `merchantOrderRef`, or `null` if you didn't send one.
@@ -220,20 +224,6 @@ data = response.json()["data"]
     "status": "Queued",
     "orderReference": "ORD-20261008120620-3f6b",
     "expiresAt": "2026-10-08T12:21:20.605646Z",
-    "stage": "Assigned",
-    "merchantOrderRef": "INV-10045"
-  }
-}
-```
-
-```json 200 Awaiting a member
-{
-  "data": {
-    "orderId": "788fcae0-5214-403c-baa2-f318c0eb1b5b",
-    "paymentPageUrl": "https://<payment-page-host>/pay?order_id=788fcae0-5214-403c-baa2-f318c0eb1b5b&expires=1791462080&signature=Xk3...&wallet=jazzcash",
-    "status": "Awaiting",
-    "orderReference": "ORD-20261008120620-3f6b",
-    "expiresAt": "2026-10-08T12:21:20.605646Z",
     "stage": "Awaiting",
     "merchantOrderRef": "INV-10045"
   }
@@ -296,11 +286,24 @@ See [Errors](/api-reference/errors) for the complete error model.
 
 ## What happens next
 
-1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes.
-2. If the order is `Awaiting`, a member is assigned when the customer opens the payment page. Until one is online the page shows "Finding an available agent…" and re-checks every 10 seconds.
-3. The customer pays and confirms on the page: with the last digits of the transaction ID, or on the QR methods by giving the account they pay from. The order moves to `AwaitingCustomerPayment` and then `AwaitingMemberConfirmation`.
-4. The member confirms (`Completed`) or rejects (`Rejected`) the payment.
-5. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
+1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
+2. The customer enters the wallet account number they will pay from: 11 digits starting with `03`. Only then does C2C assign a member.
+3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID or QR code to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 10-second countdown. If nobody becomes available within those 10 seconds, the order fails with `CancelledTimeout` and the `reason` `Failed to assign the order to a member. Please check with support.`
+4. The customer pays the exact amount in their wallet app. They submit nothing afterwards: no transaction ID and no payment confirmation.
+5. The member confirms the order when the payment arrives from the account the customer gave (`Completed`), or rejects it if the payment did not arrive (`Rejected`). If the payment isn't confirmed before the link expires, the order becomes `Expired`.
+6. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
+
+| Status | Stage | Meaning |
+|--------|-------|---------|
+| `Queued` | `Awaiting` | Created. The customer hasn't submitted the account they pay from. No member assigned. |
+| `Awaiting` | `Awaiting` | A member is being looked for, for at most about 10 seconds |
+| `AwaitingCustomerPayment` | `Assigned` | Member assigned and account shown. Waiting for the payment to arrive and the member to confirm it. |
+| `Completed` | `Completed` | Payment confirmed. Your wallet is credited. |
+| `CancelledTimeout` | `Failed` | No member could be assigned within the 10 seconds |
+| `Expired` | `Failed` | The link expired before the customer started, or before the member confirmed a payment |
+| `Rejected` | `Failed` | The member reports that the payment did not arrive |
+
+To let the customer try again after a `CancelledTimeout`, create a new order with a new `Idempotency-Key`. You can reuse the same `merchantOrderRef`, because the earlier order failed.
 
 <Warning>
   Fulfil the purchase only when the order status is `Completed`, never on the creation response.

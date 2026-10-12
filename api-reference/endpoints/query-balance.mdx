@@ -107,5 +107,5 @@ Content-Length: 0
 ## Usage tips
 
 - Check `availableBalance` before submitting [withdrawals](/api-reference/endpoints/create-withdrawal). A new withdrawal is accepted only if `availableBalance` covers its **amount + fee**; otherwise it's rejected with `422 Insufficient merchant balance`. You don't need to subtract withdrawals in progress yourself: they are in `reservedBalance`, not in `availableBalance`.
-- Fees come from fee rules C2C configures for your account, per order type and [payment method](/guides/payment-methods#fees). A rule for `JazzCash` also prices `JazzCashTillID` and `JazzCashQR` deposits that have no rule of their own, and a rule for `Easypaisa` also prices `EasypaisaQR` deposits; `TillID` keeps its own rules. The fee for an order is applied when it completes.
+- Fees come from fee rules C2C configures for your account, per order type and [payment method](/guides/payment-methods#fees). A rule for `JazzCash` also prices `JazzCashTillID` and `JazzCashQR` deposits that have no rule of their own, and a rule for `Easypaisa` also prices `EasypaisaQR` deposits; `EasypaisaTillID` keeps its own rules. The fee for an order is applied when it completes.
 - For a per-transaction history, use the **Merchant Portal** (Transactions). The API exposes only the current balance.

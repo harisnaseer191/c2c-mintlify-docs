@@ -46,7 +46,7 @@ Call [Query wallet balance](/api-reference/endpoints/query-balance). C2C accepts
 Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 
 - `orderType: "Withdrawal"`
-- `walletType`: the customer's receiving wallet or account type. One of `JazzCash`, `Easypaisa`, `TillID`, `BankAccount`; the other [payment methods](/guides/payment-methods) are deposit-only and rejected with `400`.
+- `walletType`: the customer's receiving wallet or account type. One of `JazzCash`, `Easypaisa`, `EasypaisaTillID`, `BankAccount`; the other [payment methods](/guides/payment-methods) are deposit-only and rejected with `400`.
 - `customerAccountNumber`: where to send the money (optional: leave it out to have the customer enter it on the hosted page), and optionally `customerAccountName`, the name the account is held in
 - `amount`, optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
 - a unique `Idempotency-Key` and a valid `signature` field. Withdrawals are always signature-enforced, and the signature covers the account number and amount, so they can't be changed in transit.
@@ -77,7 +77,7 @@ If the member cannot complete the payout normally — the account details are wr
 | Member reports an abnormal payment | `ManualReview` | none until resolved | unchanged until resolved |
 | Customer doesn't enter their account within 15 minutes (order created without `customerAccountNumber`) | `CancelledTimeout` | `order.failed` (`reason`: `The customer did not provide their withdrawal account in time`) | unchanged, reservation released |
 | C2C resolves a review | `Completed` / `Cancelled` | `order.completed` / `order.failed` | per outcome |
-| No member available within 120 minutes (`Awaiting` order) | `CancelledTimeout` | `order.failed` (`reason`: `No eligible member became available in time`) | unchanged, reservation released |
+| No member available within 120 minutes (`Awaiting` order) | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) | unchanged, reservation released |
 
 ## Status lifecycle
 

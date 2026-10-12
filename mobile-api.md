@@ -296,7 +296,7 @@ member's own account.
 | Order | Status | `allowedActions` |
 |---|---|---|
 | Deposit | `AwaitingCustomerPayment` — how a deposit reaches the member | `Confirm`, `Reject` |
-| Deposit | `AwaitingMemberConfirmation` (orders created before this release) | `Confirm`, `Reject` |
+| Deposit | `AwaitingMemberConfirmation` — the customer reported the payment as sent | `Confirm`, `Reject` |
 | Withdrawal | `AwaitingMemberPayout` | `Confirm`, `Reject`, `ReportAbnormalPayment` |
 | Either | `Assigned` / `Frozen` (legacy) | the above plus `Cancel` |
 | Either | anything else (completed, closed, under admin review) | `[]` |
@@ -315,10 +315,12 @@ checkout page, **before** a member is assigned. A deposit therefore reaches the 
 | `payerIdentifierLabel` | `"Customer's JazzCash account number"` (JazzCash Account Number / Till ID / QR) or `"Customer's Easypaisa account number"` (Easypaisa Account Number / Till ID / QR) |
 | `payerIdentifierSubmittedAt` | When the customer submitted it |
 
-The customer submits nothing after paying: no transaction ID, no IBAN digits and no "I have paid" step. The member
-**confirms** when a payment of the order's amount arrives from that account, or **rejects** if it does not. An order
-that is not confirmed expires with the customer's checkout link, 15 minutes after the order was created (`Expired`).
-There is no separate "customer submitted payment" event for new orders.
+No transaction ID and no IBAN digits are asked for. The member **confirms** when a payment of the order's amount
+arrives from that account, or **rejects** if it does not. After paying, the customer may tap "I have sent the payment"
+on the checkout page: the order then becomes `AwaitingMemberConfirmation` and an `OrderSubmitted` event is sent — the
+same two actions apply, and the member need not wait for it. An order that is neither confirmed nor reported expires
+with the customer's checkout link, 15 minutes after the order was created (`Expired`); a reported order is escalated
+to `ManualReview` instead when the member does not decide within their confirmation window.
 
 `TransactionIdDigits` (the last digits of a transaction ID, in `customerSubmittedTxnRef`) and `PayerIbanLastFour` (the
 last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
@@ -649,7 +651,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | Event | Sent when | `payload` |
 |---|---|---|
 | `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you. A deposit arrives ready to act on: `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier` | full order payload (below) |
-| `OrderSubmitted` | Orders created before this release only: the customer submitted their transaction reference or payer identifier. **Not sent for new orders** — there is no separate "customer submitted payment" event; a deposit is confirmed from `OrderAssigned` on | full order payload |
+| `OrderSubmitted` | The customer tapped "I have sent the payment" on the checkout page: the deposit is now `AwaitingMemberConfirmation`. Optional for the customer — a deposit can be confirmed from `OrderAssigned` on, without waiting for it | full order payload |
 | `OrderExpired` | Your order expired or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
@@ -1331,7 +1333,7 @@ All list endpoints return the same paginated envelope:
 | `Awaiting`                   | Not assigned to a member yet (e.g. a withdrawal waiting for the customer's account details or for an eligible member, or a deposit whose checkout is looking for a member) |
 | `Queued`                     | Merchant deposit whose customer has not yet submitted the account they pay from: it has no member (orders created before this release: assigned to you, waiting for the customer to open checkout; legacy orders: waiting for capacity) |
 | `AwaitingCustomerPayment`    | Deposit assigned to you: the customer was shown your account. Confirm when the payment arrives from `payerIdentifier`, reject if it does not |
-| `AwaitingMemberConfirmation` | Orders created before this release: the customer submitted their transaction reference — confirm the deposit |
+| `AwaitingMemberConfirmation` | The customer tapped "I have sent the payment" on the checkout page: check that it arrived from `payerIdentifier`, then confirm or reject |
 | `AwaitingMemberPayout`       | Withdrawal assigned to you — pay out to the customer account                |
 | `Completed`                  | Confirmed by you (terminal)                                                 |
 | `Rejected`                   | Rejected by you                                                             |

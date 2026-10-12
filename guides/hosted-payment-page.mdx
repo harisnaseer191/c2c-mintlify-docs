@@ -10,7 +10,7 @@ Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **ho
 No member is assigned when the order is created. A member, and the account the customer pays into, is assigned only after the customer has submitted the account they pay **from**. A customer who opens the link and leaves never occupies a member.
 
 <Warning>
-  **Changed behaviour.** The customer no longer enters a transaction ID (TID) or IBAN digits, and no longer taps **I've Completed Payment**. They give the wallet account they pay from **before** the payment details are shown, and there is nothing to submit after paying: the member confirms the order when the payment arrives from that account.
+  **Changed behaviour.** The customer no longer enters a transaction ID (TID) or IBAN digits. They give the wallet account they pay from **before** the payment details are shown. After paying they can tap **I have sent the payment**, which asks the member to check for it now; the member can also confirm without it, as soon as the payment arrives from that account.
 </Warning>
 
 <Info>
@@ -59,11 +59,16 @@ The page has the same three steps for all six [payment methods](/guides/payment-
   <Step title="Pay">
     The page shows where to pay, and the order moves to `AwaitingCustomerPayment`. What it shows depends on the method: see [Account number and Till ID methods](#account-number-and-till-id-methods) and [QR methods](#qr-methods). The account holder's name is never shown.
 
-    The customer sends exactly the order amount from the account they entered, using their own wallet app. **There is nothing to submit afterwards**: no transaction ID, no IBAN digits and no "I've completed payment" button.
+    The customer sends exactly the order amount from the account they entered, using their own wallet app. No transaction ID and no IBAN digits are asked for.
 
     The member who received the money confirms the order when the payment arrives from the account the customer gave. The page then shows the confirmation by itself and, if you set `successUrl`, returns the customer to your site. If the customer reloads or reopens the link meanwhile, the page shows the same payment details again.
 
-    If the payment isn't confirmed before the link expires (15 minutes after the order was created), the order becomes `Expired`.
+    If the payment is neither confirmed nor reported before the link expires (15 minutes after the order was created), the order becomes `Expired`.
+  </Step>
+  <Step title="Report the payment (optional)">
+    Under the payment details the page has an **I have sent the payment** button. Tapping it moves the order to `AwaitingMemberConfirmation`, notifies the member, and the page shows **Awaiting confirmation** until the member decides.
+
+    It is the customer's claim and completes nothing: the order becomes `Completed` only when the member confirms that the money arrived. A reported order no longer expires with the link. If the member doesn't decide within their confirmation window, it moves to `ManualReview` and is resolved by C2C operations.
   </Step>
 </Steps>
 
@@ -83,6 +88,8 @@ The page shows:
 - A tip: pay the exact amount, and always use the latest account number or Till ID shown for this order.
 - The route through the wallet app (below).
 - **Within 1 minute, the money will be credited automatically.**
+- The **I have sent the payment** button.
+- A **How to Pay?** link (below).
 
 | Method | Route shown |
 |--------|-------------|
@@ -91,7 +98,7 @@ The page shows:
 | `Easypaisa` | Easypaisa App → Send Money → Enter account number → Finish payment |
 | `EasypaisaTillID` | Easypaisa App → Pay → Till Number → Finish payment |
 
-The Till ID methods (`JazzCashTillID`, `EasypaisaTillID`) also have a **How to Pay?** link that opens a guidance picture.
+**How to Pay?** opens a popup: for the Till ID methods (`JazzCashTillID`, `EasypaisaTillID`) a guidance picture of the wallet app, for the account-number methods the same route as numbered steps.
 
 ### QR methods
 
@@ -104,6 +111,7 @@ The page shows:
 - An **Open JazzCash App** or **Open Easypaisa App** button, on phones only. It opens the wallet app's page in the phone's app store (Google Play or the App Store), where **Open** starts the installed app. A computer has no wallet app, so the button is not shown there.
 - **How to pay?**, which opens a guidance picture.
 - **Within 1 minute, money will reach your balance.**
+- The **I have sent the payment** button.
 
 The customer scans the code in their JazzCash or Easypaisa app, or loads the saved image there, and pays exactly the order amount.
 

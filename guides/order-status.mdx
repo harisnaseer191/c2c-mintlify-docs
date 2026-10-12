@@ -43,14 +43,14 @@ Awaiting → Assigned → Sent → Approved / Rejected → Completed / Failed
 |--------|-------|
 | `Awaiting`, and `Queued` while no member is assigned (every new deposit starts here) | `Awaiting` |
 | `AwaitingCustomerPayment`, `AwaitingMemberPayout` (and `Queued` on deposits created before this release, which had a member from creation, and legacy `Assigned`, `Frozen`) | `Assigned` |
-| `AwaitingMemberConfirmation` (deposits created before this release) | `Sent` |
+| `AwaitingMemberConfirmation` | `Sent` |
 | `ManualReview` | `Sent` if the customer had already paid, otherwise `Assigned` |
 | `Completed`, `Confirmed` | `Completed` |
 | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto` | `Failed` |
 
 With today's processing, approval and rejection happen in the same step as completion or failure, so the current stage is normally one of the other five. The `lifecycle` timestamps (`awaitingAt`, `assignedAt`, `sentAt`, `approvedAt`, `rejectedAt`, `completedAt`, `failedAt`) still record each step, or are `null` if it wasn't reached.
 
-A deposit normally goes straight from `Assigned` to `Completed`: the customer submits nothing after paying, so the member's confirmation is the only step. `sentAt`, `approvedAt` and `completedAt` then share one timestamp. The same holds for a withdrawal, where the member's single confirmation covers all three.
+A deposit can go straight from `Assigned` to `Completed`: when the customer doesn't tap **I have sent the payment**, the member's confirmation is the only step, and `sentAt`, `approvedAt` and `completedAt` share one timestamp. When the customer does, the deposit passes through `Sent` first and `sentAt` is the time of that report. The same holds for a withdrawal, where the member's single confirmation covers all three.
 
 <Warning>
   **Changed behaviour for deposits.** `Queued` used to mean that a member was already assigned (stage `Assigned`), and `Awaiting` that none was available. A new deposit is now always created as `Queued` with stage `Awaiting` and **no member**. It is `Awaiting` only for the few seconds in which a member is looked for after the customer submitted their account, and it has a member from `AwaitingCustomerPayment` on. The stages keep their meaning: `Awaiting` is "no member yet", `Assigned` is "a member has the order".
@@ -64,8 +64,8 @@ A deposit normally goes straight from `Assigned` to `Completed`: the customer su
     |--------|-----------|-------------|
     | `Queued` | Deposit | The customer to open the payment page and submit the account they pay from. No member is assigned yet. See [Payment methods](/guides/payment-methods#what-the-customer-submits). |
     | `Awaiting` | Both | An eligible member. Deposit: only for about 10 seconds after the customer submitted their account, while a member is looked for; it then becomes `AwaitingCustomerPayment` or fails with `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available — or, when you created it without `customerAccountNumber`, waiting first for the customer to enter their account on the hosted page. |
-    | `AwaitingCustomerPayment` | Deposit | A member is assigned and the page shows where to pay. Waiting for the customer's payment to arrive and the member to confirm it. |
-    | `AwaitingMemberConfirmation` | Deposit | Not entered by new deposits. On orders created before this release: the member to verify a payment the customer reported on the page. |
+    | `AwaitingCustomerPayment` | Deposit | A member is assigned and the page shows where to pay. Waiting for the customer's payment to arrive and the member to confirm it, or for the customer to report it. |
+    | `AwaitingMemberConfirmation` | Deposit | The customer tapped **I have sent the payment** on the page. Waiting for the member to verify that it arrived. |
     | `AwaitingMemberPayout` | Withdrawal | Member to send and confirm the payout |
     | `ManualReview` | Both | C2C operations to resolve the order |
   </Tab>

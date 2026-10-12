@@ -86,7 +86,7 @@ The customer sends exactly the order amount from the account they gave, using th
 | `EasypaisaTillID` | Their Easypaisa account number | The Till ID to pay, with a copy button |
 | `EasypaisaQR` | Their Easypaisa account number | The QR code to scan or save |
 
-There is nothing to submit after paying: no transaction ID, no IBAN digits and no "I've completed payment" button. The order stays `AwaitingCustomerPayment` until the member acts. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
+No transaction ID and no IBAN digits are asked for. After paying, the customer can tap **I have sent the payment**: the order then moves to `AwaitingMemberConfirmation` and the member is asked to check for the payment. Without it the order stays `AwaitingCustomerPayment` until the member acts. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
 
 ### 5. Member confirms
 
@@ -141,7 +141,7 @@ A deposit normally goes straight from stage `Assigned` to `Completed`: the membe
 </Note>
 
 <Note>
-  `AwaitingMemberConfirmation` is no longer entered by new deposits. It stays in the status list for orders created before this release, where the customer reported the payment on the page and the member then verified it; such an order can also move to `ManualReview` if the member didn't act in time.
+  `AwaitingMemberConfirmation` means the customer tapped **I have sent the payment** on the page and the member is verifying it. Such an order no longer expires with the checkout link; it moves to `ManualReview` if the member doesn't act in time.
 </Note>
 
 ### Retrying after a failed assignment

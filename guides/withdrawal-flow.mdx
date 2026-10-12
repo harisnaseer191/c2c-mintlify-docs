@@ -48,10 +48,11 @@ Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 - `orderType: "Withdrawal"`
 - `walletType`: the customer's receiving wallet or account type. One of `JazzCash`, `Easypaisa`, `EasypaisaTillID`, `BankAccount`; the other [payment methods](/guides/payment-methods) are deposit-only and rejected with `400`.
 - `customerAccountNumber`: where to send the money (optional: leave it out to have the customer enter it on the hosted page), and optionally `customerAccountName`, the name the account is held in
-- `amount`, optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
+- `amount`, within the [limit of the customer's provider](/guides/payment-methods#amount-limits): 1,000 to 50,000 PKR for an Easypaisa wallet, 500 to 50,000 PKR for JazzCash. Outside it the order is refused with `422` and the code `order.amountOutOfRange`.
+- optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
 - a unique `Idempotency-Key` and a valid `signature` field. Withdrawals are always signature-enforced, and the signature covers the account number and amount, so they can't be changed in transit.
 
-C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, payment method enabled, and a `merchantOrderRef` that isn't already used by a payout in progress or completed (`409`). It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees. The fee is fixed when the order is accepted; later fee-rule changes apply to new orders only.
+C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, payment method enabled, amount within the limit, and a `merchantOrderRef` that isn't already used by a payout in progress or completed (`409`). It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees. The fee is fixed when the order is accepted; later fee-rule changes apply to new orders only.
 
 If you didn't send `customerAccountNumber`, the order is accepted as `Awaiting` and waits for the customer: redirect them to `paymentPageUrl` (valid for 15 minutes). The steps below continue once they have submitted their account. If they don't, the order ends `CancelledTimeout`.
 

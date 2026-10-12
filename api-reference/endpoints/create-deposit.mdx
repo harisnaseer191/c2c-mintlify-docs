@@ -49,6 +49,8 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
 <ParamField body="amount" type="number" required>
   Amount the customer pays, in `currency`. Must be greater than `0`, have at most 4 decimal places and be less than `100,000,000,000,000`.
 
+  It must also be within the [amount limit](/guides/payment-methods#amount-limits) of the `walletType`, both ends included: `1000` to `50000` for `JazzCash` and `Easypaisa`, `500` to `50000` for `JazzCashTillID`, `JazzCashQR`, `EasypaisaTillID` and `EasypaisaQR` (and for `BankAccount`, which is paid with one of those methods). An amount outside the limit is refused with `422` and the code `order.amountOutOfRange`.
+
   **Example:** `1500`
 </ParamField>
 
@@ -67,7 +69,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
   | `EasypaisaQR` | An Easypaisa QR code |
   | `BankAccount` | Accepted, but bank accounts aren't offered on the payment page for now: the page opens on the list of available methods and the customer picks one of the six above. |
 
-  No method falls back to another. `JazzCash` and `Easypaisa` mean the account number only: request `JazzCashTillID` or `EasypaisaTillID` for a Till ID. The order is accepted whether or not an account of the requested method is available right now: a member is looked for when the customer submits the account they pay from. On the payment page the customer can still switch to another method that is enabled for you, before they submit their account.
+  No method falls back to another. `JazzCash` and `Easypaisa` mean the account number only: request `JazzCashTillID` or `EasypaisaTillID` for a Till ID. The order is accepted whether or not an account of the requested method is available right now: a member is looked for when the customer submits the account they pay from. On the payment page the customer can still switch to another method that is enabled for you and whose amount limit covers the order, before they submit their account.
 </ParamField>
 
 <ParamField body="currency" type="string" default="PKR">
@@ -257,6 +259,13 @@ data = response.json()["data"]
 }
 ```
 
+```json 422 Amount outside the limit
+{
+  "error": "JazzCash deposits must be between 1,000 and 50,000 PKR. The requested amount is 500 PKR.",
+  "code": "order.amountOutOfRange"
+}
+```
+
 ```json 422 Idempotency-Key reused
 {
   "error": "This Idempotency-Key was already used for a different order request."
@@ -276,6 +285,7 @@ data = response.json()["data"]
 | `413` | Body larger than 64 KB | `{"success": false, "error", "code": "PAYLOAD_TOO_LARGE", "traceId"}` |
 | `409` | `merchantOrderRef` is already used by an order that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | The payment method (`walletType`) is disabled for deposits on your account, for example `JazzCash deposits are disabled for this merchant.` or `JazzCashQR deposits are disabled for this merchant.` | `{"error": "..."}` |
+| `422` | The amount is outside the [limit of the payment method](/guides/payment-methods#amount-limits) | `{"error": "JazzCash deposits must be between 1,000 and 50,000 PKR. The requested amount is 500 PKR.", "code": "order.amountOutOfRange"}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 
 See [Errors](/api-reference/errors) for the complete error model.

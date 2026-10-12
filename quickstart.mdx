@@ -168,6 +168,7 @@ Keep your merchant wallet funded. A withdrawal is accepted only if your availabl
     - `Queued`, `Awaiting` and `ManualReview` treated as pending, never as failed
     - A deposit that ended `CancelledTimeout` (no member could be assigned) retried with a new order and a new `Idempotency-Key`
     - `409` handled: one live order per `merchantOrderRef`
+    - Order amounts kept within the [limit of the payment method](/guides/payment-methods#amount-limits); `422` with the code `order.amountOutOfRange` handled
     - Wallet balance monitored before submitting withdrawals; `422 Insufficient merchant balance` handled
     - Customers returned to your site through `successUrl` / `failureUrl`, with the outcome confirmed server-side
   </Accordion>

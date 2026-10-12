@@ -144,6 +144,7 @@ Besides the API key and signature, C2C applies these checks when you create an o
 | Merchant account is **Active** | `403`: `Merchant account is suspended; new orders are not accepted.` |
 | **IP whitelist**, if C2C has enabled one for your account (Deposit / Withdrawal scope) | `403`: `IP not in whitelist.` |
 | Payment method (`walletType`) **enabled** for your account and order type | `422`: `JazzCash deposits are disabled for this merchant.` |
+| Amount within the [limit of the payment method](/guides/payment-methods#amount-limits) | `422` with the code `order.amountOutOfRange`: `JazzCash deposits must be between 1,000 and 50,000 PKR. The requested amount is 500 PKR.` |
 
 ## Authentication errors
 

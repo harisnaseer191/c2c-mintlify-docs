@@ -18,6 +18,15 @@ The API uses standard HTTP status codes. The body format depends on which layer 
     ```
 
     When several validation rules fail, the messages are joined with `; `.
+
+    A refusal you may want to handle in code also carries a `code`. For now that is an amount outside the limit of the payment method:
+
+    ```json
+    {
+      "error": "JazzCash deposits must be between 1,000 and 50,000 PKR. The requested amount is 500 PKR.",
+      "code": "order.amountOutOfRange"
+    }
+    ```
   </Tab>
   <Tab title="Signature errors">
     Signature failures (`401`) and oversized bodies (`413`) return a machine-readable `code` and a `traceId`:
@@ -52,7 +61,7 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 </Tabs>
 
 <Tip>
-  Branch on the **HTTP status** and, for signature errors, on `code`. The `error` text is meant for humans and can change. Always log the `traceId` when one is present and quote it to support.
+  Branch on the **HTTP status** and, where the body has one, on `code` (signature errors and `order.amountOutOfRange`). The `error` text is meant for humans and can change. Always log the `traceId` when one is present and quote it to support.
 </Tip>
 
 ## HTTP status codes
@@ -66,7 +75,7 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 | `404` | Order not found for your merchant account | No |
 | `409` | `merchantOrderRef` already used by an order that is in progress or completed | No. Retry with the same `Idempotency-Key`, or use a new reference for a new payment. |
 | `413` | Request body over 64 KB (`PAYLOAD_TOO_LARGE`) | No. Shrink the body. |
-| `422` | Business rule declined the order: payment method (`walletType`) disabled for your account, insufficient merchant balance (withdrawals), or `Idempotency-Key` reused with different terms | Method disabled: no. Insufficient balance: after a top-up. Key reused: no. Use a new key for a new order. |
+| `422` | Business rule declined the order: payment method (`walletType`) disabled for your account, amount outside the limit of the payment method (`order.amountOutOfRange`), insufficient merchant balance (withdrawals), or `Idempotency-Key` reused with different terms | Method disabled: no. Amount outside the limit: no. Send an amount within the limit, or use another method. Insufficient balance: after a top-up. Key reused: no. Use a new key for a new order. |
 | `500` | Unexpected server error (problem details with `traceId`) | **Yes**, with backoff. For order creation, reuse the same `Idempotency-Key`. |
 
 ## Error catalogue
@@ -102,6 +111,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `422` | `Insufficient merchant balance: 2500.00 PKR available, 3000.00 PKR required …` | Withdrawal's amount + fee not covered by your available balance, which already excludes withdrawals in progress |
 | `409` | `merchantOrderRef 'INV-10045' is already used by order ORD-…. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment.` | Another order that is in progress or completed already uses this reference. References of failed orders can be reused. |
 | `422` | `JazzCash deposits are disabled for this merchant.` | That payment method (`walletType`) is disabled for your account and order type. Each of the methods is switched on or off separately. |
+| `422` | `JazzCash deposits must be between 1,000 and 50,000 PKR. The requested amount is 500 PKR.` with `code` `order.amountOutOfRange` | The amount is outside the limit of the payment method. A deposit's limit is per `walletType`; a withdrawal's is per provider, for example `Easypaisa withdrawals must be between 1,000 and 50,000 PKR. …`. See [Amount limits](/guides/payment-methods#amount-limits). |
 | `422` | `This Idempotency-Key was already used for a different order request.` | Same key, different `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` or `customerAccountNumber`. See [Idempotency](/api-reference/idempotency). |
 
 <Note>
@@ -134,6 +144,8 @@ async function handle(response) {
       // merchantOrderRef already in use: look the existing order up instead of creating another
       throw new Error(`Duplicate reference: ${body.error}`);
     case 422:
+      // Amount outside the method's limit: body.error states the limit; offer another amount or method
+      if (body.code === 'order.amountOutOfRange') throw Object.assign(new Error(body.error), { amountOutOfRange: true });
       // Payment method disabled, insufficient balance, or Idempotency-Key reused with different terms
       throw new Error(`Declined: ${body.error}`);
     case 500:

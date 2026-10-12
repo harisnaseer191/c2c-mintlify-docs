@@ -50,6 +50,8 @@ You can give the customer's receiving account in two ways:
 <ParamField body="amount" type="number" required>
   Amount the customer receives, in `currency`. Must be greater than `0`, have at most 4 decimal places and be less than `100,000,000,000,000`.
 
+  It must also be within the [amount limit](/guides/payment-methods#amount-limits) of the customer's provider, both ends included: `1000` to `50000` for an Easypaisa wallet (`Easypaisa`, `EasypaisaTillID`) and `500` to `50000` for `JazzCash`. A `BankAccount` withdrawal has no limit. An amount outside the limit is refused with `422` and the code `order.amountOutOfRange`.
+
   **Example:** `2000`
 </ParamField>
 
@@ -293,6 +295,13 @@ order_id = response.json()["data"]["orderId"]
 }
 ```
 
+```json 422 Amount outside the limit
+{
+  "error": "Easypaisa withdrawals must be between 1,000 and 50,000 PKR. The requested amount is 999 PKR.",
+  "code": "order.amountOutOfRange"
+}
+```
+
 ```json 409 Reference in use
 {
   "error": "merchantOrderRef 'PAYOUT-20017' is already used by order ORD-20261008120621-a7b8. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment."
@@ -314,6 +323,7 @@ order_id = response.json()["data"]["orderId"]
 | `409` | `merchantOrderRef` is already used by a payout that is in progress or completed | `{"error": "merchantOrderRef '...' is already used by order ORD-…. ..."}` |
 | `422` | Your available balance can't cover this payout plus its fee | `{"error": "Insufficient merchant balance: ..."}` |
 | `422` | The payment method (`walletType`) is disabled for withdrawals on your account | `{"error": "..."}` |
+| `422` | The amount is outside the [limit of the customer's provider](/guides/payment-methods#amount-limits) | `{"error": "Easypaisa withdrawals must be between 1,000 and 50,000 PKR. The requested amount is 999 PKR.", "code": "order.amountOutOfRange"}` |
 | `422` | The `Idempotency-Key` was already used with different order terms | `{"error": "This Idempotency-Key was already used for a different order request."}` |
 
 ## Funding check

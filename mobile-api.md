@@ -161,10 +161,16 @@ GET /api/member/me
         "accountTypeLabel": "JazzCash Account Number"
       }
     ],
-    "createdAt": "2026-01-15T09:00:00Z"
+    "createdAt": "2026-01-15T09:00:00Z",
+    "withdrawalRequestsEnabled": false
   }
 }
 ```
+
+`withdrawalRequestsEnabled` says whether the member can send a new [withdrawal request](#withdrawal-requests). It is
+`false` for now (server setting `MemberFinance:WithdrawalRequestsEnabled`). While it is `false`, or absent, the app
+shows a notice on the Withdraw tab instead of the form — "Withdrawal requests are not available right now. To withdraw
+your balance, use Payin/Collection…" with a **Go to Collections** button — and keeps the request history below it.
 
 **Response 401** — Not authenticated  
 **Response 404** — No member record found for this account
@@ -1248,7 +1254,18 @@ POST /api/member/withdrawal-requests
 
 **Response 200** — Created withdrawal request (status: `Pending`)  
 **Response 400** — Insufficient balance or amount exceeds draw limit  
-**Response 422** — Business rule violation
+**Response 422** — Withdrawal requests are switched off (the default for now; see `withdrawalRequestsEnabled` on
+[Get My Profile](#get-my-profile)). Nothing is created:
+
+```json
+{
+  "error": "Withdrawal requests are not available right now. To withdraw your balance, use Payin/Collection: turn Collections on and receive customer payments in your own account.",
+  "code": "withdrawalRequest.disabled"
+}
+```
+
+It is a `422`, not a `403`: the app answers a `403` by refreshing its token and sending the request again. Requests
+sent before the switch are still listed and reviewed.
 
 ---
 
@@ -1261,6 +1278,9 @@ GET /api/platform-accounts/active
 ```
 
 No authentication required. Shows the platform's recharge accounts that members should send money to when submitting a recharge request.
+
+In the app each account has a **Copy** button that puts its `accountNumber` on the clipboard, to paste into the wallet
+app. Copying does not select the account; tapping the row does.
 
 **Response 200**
 ```json

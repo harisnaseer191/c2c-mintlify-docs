@@ -53,7 +53,8 @@ Your backend calls [Create Deposit Order](/api-reference/endpoints/create-deposi
 3. **Request** valid, otherwise `400`
 4. **Merchant account** active and **IP whitelist** passed, otherwise `403`
 5. **Payment method** (`walletType`) enabled for deposits on your account, otherwise `422`
-6. **`merchantOrderRef`** not already used by an order that is in progress or completed, otherwise `409`. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
+6. **Amount** within the [limit of the payment method](/guides/payment-methods#amount-limits), otherwise `422` with the code `order.amountOutOfRange`
+7. **`merchantOrderRef`** not already used by an order that is in progress or completed, otherwise `409`. See [`merchantOrderRef` rules](/guides/order-status#merchantorderref-rules).
 
 The order is then **accepted** (`200`) with status `Queued` and stage `Awaiting`, and you get its `orderId`, `orderReference` and `paymentPageUrl`. **No member is assigned yet.** A member is assigned only when the customer submits the account they pay from (step 3), so a customer who opens the link and leaves never occupies a member.
 

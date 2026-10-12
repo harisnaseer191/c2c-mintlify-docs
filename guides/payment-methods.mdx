@@ -1,6 +1,6 @@
 ---
 title: "Payment Methods"
-description: "The six deposit payment methods, the walletType for each, how C2C matches a receiving account, and what your customer enters on the payment page."
+description: "The six deposit payment methods, the walletType for each, the amount limits per method, how C2C matches a receiving account, and what your customer enters on the payment page."
 ---
 
 ## Overview
@@ -58,7 +58,7 @@ Creating the order never depends on a member being available: a deposit is alway
 
 ### When the customer changes the method
 
-The payment page opens directly on the `walletType` you requested, with no method list. A customer only chooses a method themselves when they reach the page through a link that names none: the page then lists the methods enabled for your account (so it can show fewer than six), and until they submit their account they can go back with **Pay another way**. An order paid on another method than the one you requested asks for the account of that method's provider, and your fee is re-quoted for it. Once an account number, Till ID or QR code has been shown, the order stays on that method.
+The payment page opens directly on the `walletType` you requested, with no method list. A customer only chooses a method themselves when they reach the page through a link that names none: the page then lists the methods that are enabled for your account and whose [amount limit](#amount-limits) covers the order (so it can show fewer than six), and until they submit their account they can go back with **Pay another way**. An order paid on another method than the one you requested asks for the account of that method's provider, and your fee is re-quoted for it. Once an account number, Till ID or QR code has been shown, the order stays on that method.
 
 ## What the customer submits
 
@@ -79,9 +79,55 @@ Only after they submit it does C2C assign a member and show that member's accoun
   The account the customer enters is their claim, not proof. The order completes only when the member confirms that the money arrived. The account a customer pays from isn't returned by the Merchant API or sent in webhooks.
 </Note>
 
+## Amount limits
+
+Every order must be for an amount within the limit of its payment method. A limit applies to one order, and both ends are included: a `JazzCash` deposit of exactly `1000` or exactly `50000` is accepted.
+
+### Deposits (pay-in)
+
+| `walletType` | Minimum (PKR) | Maximum (PKR) |
+|--------------|---------------|---------------|
+| `Easypaisa` | 1,000 | 50,000 |
+| `EasypaisaTillID` | 500 | 50,000 |
+| `EasypaisaQR` | 500 | 50,000 |
+| `JazzCash` | 1,000 | 50,000 |
+| `JazzCashTillID` | 500 | 50,000 |
+| `JazzCashQR` | 500 | 50,000 |
+
+A `BankAccount` deposit is paid with one of the six methods above, because bank accounts aren't offered on the payment page for now. Its amount must therefore be one that at least one of them accepts: 500 to 50,000 PKR.
+
+### Withdrawals (payout)
+
+A withdrawal's limit is set by the provider of the customer's wallet.
+
+| Provider | `walletType` | Minimum (PKR) | Maximum (PKR) |
+|----------|--------------|---------------|---------------|
+| Easypaisa | `Easypaisa`, `EasypaisaTillID` | 1,000 | 50,000 |
+| JazzCash | `JazzCash` | 500 | 50,000 |
+
+A `BankAccount` withdrawal has no amount limit.
+
+### When an amount is outside the limit
+
+Creating the order is refused with `422` and the code `order.amountOutOfRange`. No order is created, so you can correct the request and reuse the same `Idempotency-Key`.
+
+```json
+{
+  "error": "JazzCash deposits must be between 1,000 and 50,000 PKR. The requested amount is 500 PKR.",
+  "code": "order.amountOutOfRange"
+}
+```
+
+- Check the amount against the tables above before you create an order, and branch on `code` when the API refuses one. The `error` text states the limit in force and the amount you sent.
+- A deposit below 1,000 PKR can still be collected on a Till ID or QR method, whose minimum is 500 PKR.
+- The message of a withdrawal names the provider, for example `Easypaisa withdrawals must be between 1,000 and 50,000 PKR. The requested amount is 999 PKR.`
+- C2C can change these limits. An order that was already accepted isn't affected: it keeps its payment method, and a retry with its `Idempotency-Key` returns the original order.
+
+On the [hosted payment page](/guides/hosted-payment-page) a customer who chooses the method themselves is only offered the methods whose limit covers the order amount. The method you requested when you created the order always stays available to them.
+
 ## Withdrawals
 
-Withdrawals are unchanged. A withdrawal's `walletType` must be one of `JazzCash`, `Easypaisa`, `EasypaisaTillID` or `BankAccount`.
+A withdrawal's `walletType` must be one of `JazzCash`, `Easypaisa`, `EasypaisaTillID` or `BankAccount`, and its amount must be within the [limit of the customer's provider](#withdrawals-payout).
 
 `JazzCashTillID`, `JazzCashQR` and `EasypaisaQR` are deposit-only. A withdrawal on one of them is rejected with `400`:
 
@@ -120,6 +166,6 @@ Among your account's rules, one for the exact method takes precedence over the p
     Full lifecycle, statuses and timeouts
   </Card>
   <Card title="Errors" icon="triangle-exclamation" href="/api-reference/errors">
-    Disabled methods and deposit-only methods
+    Disabled methods, deposit-only methods and amount limits
   </Card>
 </CardGroup>

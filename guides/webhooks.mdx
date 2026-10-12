@@ -35,9 +35,13 @@ Webhooks are sent for **final outcomes only**.
 | `eventType` | Sent when | `status` in payload |
 |-------------|-----------|---------------------|
 | `order.completed` | The order settled: the member confirmed receipt of a deposit or the payout of a withdrawal, or C2C operations resolved the order as confirmed. **Safe to fulfil.** | `Completed` (or legacy `Confirmed`) |
-| `order.failed` | The order ended without settlement: the member rejected it, the checkout link expired, no member became available in time, or it was cancelled (by C2C operations or automatically) | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto` |
+| `order.failed` | The order ended without settlement: the member rejected it, the checkout link expired, no member could be assigned in time, or it was cancelled (by C2C operations or automatically) | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto` |
 
-Example `reason` values on `order.failed`: `Checkout expired before payment`, `No eligible member became available in time`, the member's rejection reason, or the resolution note from C2C operations.
+Example `reason` values on `order.failed`: `Checkout expired before payment`, `Failed to assign the order to a member. Please check with support.` (no member could be assigned: within about 10 seconds of the customer submitting their account for a deposit, within 120 minutes for a withdrawal), the member's rejection reason, or the resolution note from C2C operations.
+
+<Note>
+  The reason for a failed member assignment changed. It used to be `No eligible member became available in time`. `reason` is free text for humans, so don't branch on it; use `status` (`CancelledTimeout`) instead.
+</Note>
 
 <Note>
   `ManualReview` doesn't send a webhook. The order isn't final: it's being handled by C2C operations, and you can see it through [status inquiry](/api-reference/endpoints/query-order-status) (status `ManualReview`). You receive `order.completed` or `order.failed` once it is resolved. Don't refund or re-pay the customer in the meantime.
@@ -87,9 +91,9 @@ X-C2C-Timestamp: 1791461502
   "stage": "Completed",
   "lifecycle": {
     "createdAt": "2026-10-08T12:06:20.605646Z",
-    "awaitingAt": null,
-    "assignedAt": "2026-10-08T12:06:20.605646Z",
-    "sentAt": "2026-10-08T12:08:57.402113Z",
+    "awaitingAt": "2026-10-08T12:06:20.605646Z",
+    "assignedAt": "2026-10-08T12:06:58.211907Z",
+    "sentAt": "2026-10-08T12:11:42.118204Z",
     "approvedAt": "2026-10-08T12:11:42.118204Z",
     "rejectedAt": null,
     "completedAt": "2026-10-08T12:11:42.118204Z",
@@ -99,6 +103,8 @@ X-C2C-Timestamp: 1791461502
   "timestamp": "2026-10-08T12:11:42.5038227Z"
 }
 ```
+
+In this deposit, `assignedAt` is when the customer submitted the account they pay from and a member was assigned, and `sentAt`, `approvedAt` and `completedAt` share the time of the member's confirmation. See [lifecycle stages](/guides/order-status#lifecycle-stages).
 
 ### Payload: `order.failed`
 
@@ -142,7 +148,7 @@ X-C2C-Timestamp: 1791461502
 | `stage` | string | Lifecycle stage: `Completed` or `Failed` on these events. See [lifecycle stages](/guides/order-status#lifecycle-stages). |
 | `lifecycle` | object | When each milestone was reached: `createdAt`, `awaitingAt`, `assignedAt`, `sentAt`, `approvedAt`, `rejectedAt`, `completedAt`, `failedAt`. ISO 8601 UTC, or `null` if not reached. |
 | `completedAt` | string | `order.completed` only. ISO 8601 UTC completion time. |
-| `reason` | string | `order.failed` only. Free-text explanation for humans, for example the member's rejection reason or `Checkout expired before payment`. Don't branch on it. |
+| `reason` | string | `order.failed` only. Free-text explanation for humans, for example the member's rejection reason, `Checkout expired before payment` or `Failed to assign the order to a member. Please check with support.` Don't branch on it. |
 | `timestamp` | string | ISO 8601 UTC time the event was generated. It stays the same on every retry of the same delivery. |
 
 ## Verifying the signature

@@ -20,7 +20,7 @@ description: "Identifiers, statuses and how to reliably find out the outcome of 
 
 - It's optional. When you send it, only **one live order** can use a reference. Creating another order with a reference already used by an order that is in progress or completed returns `409`:
   `merchantOrderRef 'INV-10045' is already used by order ORD-…. Reuse the same Idempotency-Key to retry a request, or use a new reference for a new payment.`
-- You **can** reuse a reference whose earlier order failed (`Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto`), for example to retry a checkout. A lookup by reference returns the **latest** order with that reference.
+- You **can** reuse a reference whose earlier order failed (`Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto`), for example to retry a checkout after a deposit ended `CancelledTimeout` because no member could be assigned. A lookup by reference returns the **latest** order with that reference.
 
 ## Lifecycle stages
 
@@ -32,23 +32,29 @@ Awaiting → Assigned → Sent → Approved / Rejected → Completed / Failed
 
 | Stage | Meaning |
 |-------|---------|
-| `Awaiting` | Accepted, waiting for an eligible member |
-| `Assigned` | A member has the order. No money has been sent yet. |
-| `Sent` | Deposit: the customer confirmed their payment on the payment page. Withdrawal: the member sent the payout. |
+| `Awaiting` | Accepted, no member assigned yet. Deposit: the customer hasn't submitted the account they pay from, or a member is being looked for. Withdrawal: waiting for an eligible member, or for the customer to enter their account. |
+| `Assigned` | A member has the order. Deposit: the customer has been shown where to pay, and the payment isn't confirmed yet. Withdrawal: the payout hasn't been sent yet. |
+| `Sent` | Deposit: the payment arrived. This is recorded when the member confirms it, so a new deposit doesn't rest in this stage. Withdrawal: the member sent the payout. |
 | `Approved` / `Rejected` | The member's decision |
 | `Completed` | Settled: your merchant wallet was credited (deposit) or debited (withdrawal) |
 | `Failed` | Final without settlement |
 
 | Status | Stage |
 |--------|-------|
-| `Awaiting` | `Awaiting` |
-| `Queued`, `AwaitingCustomerPayment`, `AwaitingMemberPayout` (and legacy `Assigned`, `Frozen`) | `Assigned` |
-| `AwaitingMemberConfirmation` | `Sent` |
+| `Awaiting`, and `Queued` while no member is assigned (every new deposit starts here) | `Awaiting` |
+| `AwaitingCustomerPayment`, `AwaitingMemberPayout` (and `Queued` on deposits created before this release, which had a member from creation, and legacy `Assigned`, `Frozen`) | `Assigned` |
+| `AwaitingMemberConfirmation` (deposits created before this release) | `Sent` |
 | `ManualReview` | `Sent` if the customer had already paid, otherwise `Assigned` |
 | `Completed`, `Confirmed` | `Completed` |
 | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto` | `Failed` |
 
-With today's processing, approval and rejection happen in the same step as completion or failure, so the current stage is normally one of the other five. The `lifecycle` timestamps (`awaitingAt`, `assignedAt`, `sentAt`, `approvedAt`, `rejectedAt`, `completedAt`, `failedAt`) still record each step, or are `null` if it wasn't reached. For a withdrawal, the member's single confirmation means `sentAt`, `approvedAt` and `completedAt` share one timestamp.
+With today's processing, approval and rejection happen in the same step as completion or failure, so the current stage is normally one of the other five. The `lifecycle` timestamps (`awaitingAt`, `assignedAt`, `sentAt`, `approvedAt`, `rejectedAt`, `completedAt`, `failedAt`) still record each step, or are `null` if it wasn't reached.
+
+A deposit normally goes straight from `Assigned` to `Completed`: the customer submits nothing after paying, so the member's confirmation is the only step. `sentAt`, `approvedAt` and `completedAt` then share one timestamp. The same holds for a withdrawal, where the member's single confirmation covers all three.
+
+<Warning>
+  **Changed behaviour for deposits.** `Queued` used to mean that a member was already assigned (stage `Assigned`), and `Awaiting` that none was available. A new deposit is now always created as `Queued` with stage `Awaiting` and **no member**. It is `Awaiting` only for the few seconds in which a member is looked for after the customer submitted their account, and it has a member from `AwaitingCustomerPayment` on. The stages keep their meaning: `Awaiting` is "no member yet", `Assigned` is "a member has the order".
+</Warning>
 
 ## Statuses
 
@@ -56,10 +62,10 @@ With today's processing, approval and rejection happen in the same step as compl
   <Tab title="In progress">
     | Status | Order type | Waiting for |
     |--------|-----------|-------------|
-    | `Awaiting` | Both | An eligible member. Deposit: assigned when the customer opens the payment page. Withdrawal: assigned automatically as soon as a member is available — or, when you created it without `customerAccountNumber`, waiting first for the customer to enter their account on the hosted page. |
-    | `Queued` | Deposit | Customer to open the payment page |
-    | `AwaitingCustomerPayment` | Deposit | Customer to pay and confirm on the payment page: the last digits of the transaction ID, or on the QR methods the account they pay from. See [Payment methods](/guides/payment-methods#what-the-customer-submits). |
-    | `AwaitingMemberConfirmation` | Deposit | Member to verify the payment |
+    | `Queued` | Deposit | The customer to open the payment page and submit the account they pay from. No member is assigned yet. See [Payment methods](/guides/payment-methods#what-the-customer-submits). |
+    | `Awaiting` | Both | An eligible member. Deposit: only for about 10 seconds after the customer submitted their account, while a member is looked for; it then becomes `AwaitingCustomerPayment` or fails with `CancelledTimeout`. Withdrawal: assigned automatically as soon as a member is available — or, when you created it without `customerAccountNumber`, waiting first for the customer to enter their account on the hosted page. |
+    | `AwaitingCustomerPayment` | Deposit | A member is assigned and the page shows where to pay. Waiting for the customer's payment to arrive and the member to confirm it. |
+    | `AwaitingMemberConfirmation` | Deposit | Not entered by new deposits. On orders created before this release: the member to verify a payment the customer reported on the page. |
     | `AwaitingMemberPayout` | Withdrawal | Member to send and confirm the payout |
     | `ManualReview` | Both | C2C operations to resolve the order |
   </Tab>
@@ -72,9 +78,9 @@ With today's processing, approval and rejection happen in the same step as compl
   <Tab title="Final: not completed">
     | Status | Meaning |
     |--------|---------|
-    | `Rejected` | Member rejected the order |
-    | `Expired` | Deposit checkout link (15 minutes) expired before the customer paid |
-    | `CancelledTimeout` | No eligible member became available in time (an `Awaiting` order reached its timeout) |
+    | `Rejected` | Member rejected the order. Deposit: the member reports that the payment did not arrive. |
+    | `Expired` | Deposit checkout link (15 minutes) expired before the customer submitted their account, or before the member confirmed a payment |
+    | `CancelledTimeout` | No member could be assigned in time. Deposit: none became available within about 10 seconds of the customer submitting their account. Withdrawal: none within 120 minutes, or the customer didn't enter their account within 15 minutes. The `reason` is `Failed to assign the order to a member. Please check with support.` when no member could be assigned. |
     | `Cancelled` | Cancelled by C2C or the member |
     | `CancelledAuto` | Cancelled automatically by the system |
   </Tab>
@@ -106,5 +112,5 @@ The Merchant API has no request rate limits, but prefer webhooks to tight pollin
 | Outcome | Deposit | Withdrawal |
 |---------|---------|------------|
 | `Completed` / `Confirmed` | Fulfil the purchase | Mark the payout as paid |
-| `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto` | Don't fulfil. The customer can start a new checkout (new order, new `Idempotency-Key`). | Payout not made. Create a new withdrawal if appropriate. |
+| `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled`, `CancelledAuto` | Don't fulfil. The customer can start a new checkout: a new order with a new `Idempotency-Key`. The same `merchantOrderRef` can be reused, because the earlier order failed. | Payout not made. Create a new withdrawal if appropriate. |
 | `ManualReview` | Hold. The customer may already have paid. | Hold. Don't re-pay. |

@@ -211,20 +211,20 @@ GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
         "accountHolderName": "Ali Hassan",
         "walletType": "JazzCash",
         "orderType": "Deposit",
-        "status": "AwaitingMemberConfirmation",
+        "status": "AwaitingCustomerPayment",
         "currency": "PKR",
         "amount": 5000.00,
         "commissionAmount": 125.00,
         "orderReference": "ORD-20260607-001",
         "txnRefNo": null,
         "memberTxnRefNo": null,
-        "customerSubmittedTxnRef": "9022",
-        "customerSubmittedTxnRefAt": "2026-06-07T10:01:30Z",
-        "proofKind": "TransactionIdDigits",
-        "payerIdentifier": null,
-        "payerIdentifierKind": null,
-        "payerIdentifierLabel": null,
-        "payerIdentifierSubmittedAt": null,
+        "customerSubmittedTxnRef": null,
+        "customerSubmittedTxnRefAt": null,
+        "proofKind": "PayerWalletNumber",
+        "payerIdentifier": "03009876543",
+        "payerIdentifierKind": "PayerWalletNumber",
+        "payerIdentifierLabel": "Customer's JazzCash account number",
+        "payerIdentifierSubmittedAt": "2026-06-07T10:00:00Z",
         "customerIdentifier": "CUST-1",
         "merchantApiKeyId": "…",
         "merchantApiKeyName": "Store key",
@@ -235,18 +235,10 @@ GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
         "customerWalletType": null,
         "accountKind": "AccountNumber",
         "accountTypeLabel": "JazzCash Account Number",
-        "evidence": [
-          {
-            "id": "b8f0fcd9-…",
-            "kind": "CustomerPaymentProof",
-            "contentType": "image/png",
-            "sizeBytes": 48211,
-            "uploadedAt": "2026-06-07T10:01:20Z"
-          }
-        ],
+        "evidence": [],
         "allowedActions": ["Confirm", "Reject"],
         "assignedAt": "2026-06-07T10:00:00Z",
-        "expiresAt": "2026-06-07T10:05:00Z",
+        "expiresAt": "2026-06-07T10:13:00Z",
         "confirmedAt": null,
         "cancelledAt": null,
         "frozenAt": null,
@@ -288,13 +280,13 @@ member's own account.
 | `commissionAmount` | The member's reward; `null` until it is known |
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
-| `proofKind` | **Deposit**: what the customer of this order submits so the member can find the payment — [`OrderProofKind`](#orderproofkind): `TransactionIdDigits` \| `PayerWalletNumber` \| `PayerIbanLastFour`. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
-| `customerSubmittedTxnRef` | **Deposit by account number / Till ID** (`proofKind: TransactionIdDigits`): the last 4 digits of the TID the customer *says* they paid with. A claim to compare with your own wallet app — **not verification**. Only the order `status` says a payment was accepted. Stays `null` for QR deposits |
-| `customerSubmittedTxnRefAt` | When the customer submitted it |
-| `payerIdentifier` | **QR deposit**: the account the customer *says* they paid from — their JazzCash wallet number (`PayerWalletNumber`) or the last 4 digits of their Easypaisa IBAN (`PayerIbanLastFour`). A claim, **not verification**, and **never a transaction ID**. `null` until submitted, and for every other order |
-| `payerIdentifierKind` | `PayerWalletNumber` \| `PayerIbanLastFour` \| `null` — what `payerIdentifier` is |
-| `payerIdentifierLabel` | What it is, in words, to label it with: `"Customer's JazzCash wallet number"` / `"Last 4 digits of the customer's Easypaisa IBAN"` (`null` when there is none) |
+| `proofKind` | **Deposit**: what the customer of this order gave so the member can find the payment — [`OrderProofKind`](#orderproofkind). `PayerWalletNumber` on every new deposit, whatever the payment method; `TransactionIdDigits` and `PayerIbanLastFour` only appear on orders created before this release. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
+| `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
+| `payerIdentifierKind` | `PayerWalletNumber` \| `null` — what `payerIdentifier` is (`PayerIbanLastFour` only on orders created before this release) |
+| `payerIdentifierLabel` | What it is, in words, to label it with: `"Customer's JazzCash account number"` / `"Customer's Easypaisa account number"` (`null` when there is none) |
 | `payerIdentifierSubmittedAt` | When the customer submitted it |
+| `customerSubmittedTxnRef` | **Orders created before this release only** (`proofKind: TransactionIdDigits`): the last digits of the TID the customer *said* they paid with — a claim, **not verification**. The customer is no longer asked for a transaction ID, so it is `null` on every new order |
+| `customerSubmittedTxnRefAt` | When the customer submitted it (`null` on every new order) |
 | `memberTxnRefNo` | **Withdrawal**: the last 4 digits of the member's payout TID. **Deposit**: the member's optional reference |
 | `evidence[]` | Images attached to the order: `{ id, kind, contentType, sizeBytes, uploadedAt }`. `kind` is `CustomerPaymentProof` (deposit, uploaded by the customer — not verification), `MemberPayoutProof` or `AbnormalPaymentEvidence` (withdrawal, uploaded by the member). Fetch the bytes from [Get Order Evidence](#get-order-evidence) |
 | `allowedActions` | What the assigned member may do **now**: any of `Confirm`, `Reject`, `ReportAbnormalPayment`, `Cancel`. Render action buttons from this list — never from status comparisons. `Cancel` is legacy-only; the app does not offer it |
@@ -303,29 +295,39 @@ member's own account.
 
 | Order | Status | `allowedActions` |
 |---|---|---|
-| Deposit | `AwaitingMemberConfirmation` | `Confirm`, `Reject` |
+| Deposit | `AwaitingCustomerPayment` — how a deposit reaches the member | `Confirm`, `Reject` |
+| Deposit | `AwaitingMemberConfirmation` (orders created before this release) | `Confirm`, `Reject` |
 | Withdrawal | `AwaitingMemberPayout` | `Confirm`, `Reject`, `ReportAbnormalPayment` |
 | Either | `Assigned` / `Frozen` (legacy) | the above plus `Cancel` |
-| Either | anything else (waiting for the customer, completed, closed, under admin review) | `[]` |
+| Either | anything else (completed, closed, under admin review) | `[]` |
 
 #### What the customer submits (`proofKind`)
 
-A payment to an account number or a Till ID has a transaction ID the customer can quote. A QR payment has none the
-customer can be asked for up front, so the member finds it by **who paid**. The two are never the same thing and the
-app never shows one as the other.
+On every deposit — all six payment methods — the customer gives **the wallet account number they pay from** on the
+checkout page, **before** a member is assigned. A deposit therefore reaches the member in status
+`AwaitingCustomerPayment` with `allowedActions: ["Confirm", "Reject"]` and the payer account already on it:
 
-| `proofKind` | Member's account | The customer submits | Field | The app shows |
-|---|---|---|---|---|
-| `TransactionIdDigits` | Account Number / Till ID | Last digits of the transaction ID | `customerSubmittedTxnRef` | "TID (last digits)" |
-| `PayerWalletNumber` | JazzCash QR | The JazzCash wallet number they paid from | `payerIdentifier` | `payerIdentifierLabel` — "Customer's JazzCash wallet number" |
-| `PayerIbanLastFour` | Easypaisa QR | The last 4 digits of the Easypaisa IBAN they paid from | `payerIdentifier` | `payerIdentifierLabel` — "Last 4 digits of the customer's Easypaisa IBAN" |
+| Field | Value on a new deposit |
+|---|---|
+| `proofKind` | `PayerWalletNumber` |
+| `payerIdentifier` | The customer's wallet account number, e.g. `03009876543` |
+| `payerIdentifierKind` | `PayerWalletNumber` |
+| `payerIdentifierLabel` | `"Customer's JazzCash account number"` (JazzCash Account Number / Till ID / QR) or `"Customer's Easypaisa account number"` (Easypaisa Account Number / Till ID / QR) |
+| `payerIdentifierSubmittedAt` | When the customer submitted it |
+
+The customer submits nothing after paying: no transaction ID, no IBAN digits and no "I have paid" step. The member
+**confirms** when a payment of the order's amount arrives from that account, or **rejects** if it does not. An order
+that is not confirmed expires with the customer's checkout link, 15 minutes after the order was created (`Expired`).
+There is no separate "customer submitted payment" event for new orders.
+
+`TransactionIdDigits` (the last digits of a transaction ID, in `customerSubmittedTxnRef`) and `PayerIbanLastFour` (the
+last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
+release.
 
 On Order Details and in the confirm sheet the value sits under **"Customer-submitted payment (not verified)"**, with a
 Copy button and the time it was submitted. It is a verification aid — the member looks for a payment of the order
-amount from that sender in their own wallet app — and not proof. For a QR deposit the app shows no TID row and no
-"no reference" placeholder; while nothing has been submitted it says, for example, "The customer has not submitted
-their JazzCash wallet number yet." The app shows a payer identifier only on the assigned member's own order
-screens — never in a toast, a notification or a log.
+amount from that sender in their own wallet app — and not proof. The app shows a payer identifier only on the assigned
+member's own order screens — never in a toast, a notification or a log.
 
 ---
 
@@ -361,11 +363,12 @@ POST /api/member/orders/{id}/confirm
 ```
 
 `memberTxnRefNo` — optional for deposits: the member's own reference, e.g. the last digits of the incoming
-transaction ID (at most 20 characters). The app sends it only when the member typed one. Compare
-`customerSubmittedTxnRef` — or, for a QR deposit, `payerIdentifier` (see
-[What the customer submits](#what-the-customer-submits-proofkind)) — with your wallet app before confirming; it is the
-customer's claim, not proof. The request is the same for all six payment methods: a QR deposit sends no payer
-identifier back.
+transaction ID (at most 20 characters). The app sends it only when the member typed one. A deposit can be confirmed
+as soon as it is assigned (`AwaitingCustomerPayment`): before confirming, look in your wallet app for a payment of the
+order's amount from `payerIdentifier` (see [What the customer submits](#what-the-customer-submits-proofkind)) — it is
+the customer's claim, not proof. Confirm when that payment has arrived; [reject](#reject-order) if it has not. The
+request is the same for all six payment methods and sends no payer identifier back. (On an order created before this
+release with `proofKind: TransactionIdDigits`, compare `customerSubmittedTxnRef` instead.)
 
 **Request — withdrawal** (both fields required)
 ```json
@@ -423,7 +426,7 @@ provider:
 | Customer's wallet (`customerWalletType`) | Accounts listed |
 |---|---|
 | `JazzCash` | Your JazzCash accounts — whatever their type |
-| `Easypaisa`, `TillID` | Your Easypaisa accounts — whatever their type |
+| `Easypaisa`, `EasypaisaTillID` | Your Easypaisa accounts — whatever their type |
 
 (A withdrawal's customer wallet is never one of the deposit-only channels `JazzCashTillID`, `JazzCashQR`,
 `EasypaisaQR`.)
@@ -568,8 +571,10 @@ could not be completed."). Use [Reject Order](#reject-order) or [Report Abnormal
 
 ## Realtime Order Delivery
 
-When a merchant creates an order, the platform **assigns it to a member immediately** and delivers it to
-that member's app. Every event is first stored in the member's **notification inbox** and then pushed
+The platform assigns an order to a member and delivers it to that member's app. A **withdrawal** is assigned as soon
+as the merchant creates it (or, when the customer still has to enter their account, once they have). A **deposit** is
+assigned only when its customer has submitted the account they pay from on the checkout page — an order whose
+customer opens the link and leaves is never given to a member. Every event is first stored in the member's **notification inbox** and then pushed
 live over SignalR, so nothing is lost while the app is closed or offline — missed events are replayed
 on the next connection.
 
@@ -578,8 +583,11 @@ on the next connection.
 A member is eligible when they are **online** (`isOnline`, set through `PATCH /api/member/availability`), have **Collections enabled**, have
 a wallet account for the order (below), the order currency matches theirs, the amount is within their pay limit
 (deposits) / draw limit (withdrawals), they have a free slot under their concurrent-order limit, and — for
-deposits — their **available wallet balance covers the amount**. Among eligible members the least-loaded one is
-chosen, then the one who waited longest since their last order (fair rotation).
+deposits — their **available wallet balance covers the amount**.
+
+**Fair distribution.** Orders are given to the eligible online members in rotation: the member who has waited longest
+since their last order gets the next one, and members level on that are picked at random. How many orders a member
+has open no longer decides who is next — only whether they are still under their concurrent-order limit.
 
 **Transfer routes — money only moves within one provider.**
 
@@ -594,12 +602,15 @@ A member with only JazzCash accounts is never given an Easypaisa order, and the 
 Withdrawals the member does not pay out in time are reassigned to another member (the previous member
 receives `OrderReassigned`, the new one `OrderAssigned`).
 
-**Deposits and the customer checkout.** A deposit's account number is only shown to the customer when they
-pick a wallet on the checkout page, and only an **online** member's account is ever shown: if the assigned
-member is offline at that moment, the order is moved to an online member first (the previous member receives
-`OrderReassigned`, the new one `OrderAssigned`). Once an account has been shown the order never moves — the
-customer may already have paid — and the customer's transaction reference is accepted even if the member has
-gone offline since.
+**Deposits and the customer checkout.** A deposit has no member while its customer has not started. On the checkout
+page the customer first enters the wallet account number they pay from; only then is an eligible **online** member
+assigned and that member's account number, Till ID or QR code shown to the customer. The order reaches the member
+with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier`. If no
+member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
+Once an account has been shown the order never moves — the customer may already have paid — and the member can
+confirm or reject it even after going offline. The member confirms when the payment arrives from the customer's
+account; an order not confirmed before the checkout link expires (15 minutes after the order was created) becomes
+`Expired`.
 
 **Going offline.** Only online members with Collections enabled are assigned new orders. Online / Collections
 change **only** through `PATCH /api/member/availability` (or an admin) — closing the app, losing the network or
@@ -637,8 +648,8 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 
 | Event | Sent when | `payload` |
 |---|---|---|
-| `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you | full order payload (below) |
-| `OrderSubmitted` | The customer submitted their transaction reference — or, for a QR deposit, their payer identifier — confirm the deposit | full order payload |
+| `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you. A deposit arrives ready to act on: `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier` | full order payload (below) |
+| `OrderSubmitted` | Orders created before this release only: the customer submitted their transaction reference or payer identifier. **Not sent for new orders** — there is no separate "customer submitted payment" event; a deposit is confirmed from `OrderAssigned` on | full order payload |
 | `OrderExpired` | Your order expired or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
@@ -670,19 +681,19 @@ is the fixed member-safe hold text while the account is on hold. On this event t
   "orderId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "orderReference": "ORD-20261007120000-ab12",
   "orderType": "Deposit",
-  "status": "Queued",
+  "status": "AwaitingCustomerPayment",
   "amount": 1000.0,
   "currency": "PKR",
   "paymentAccountId": "…",
   "paymentAccountWalletType": "JazzCash",
   "paymentAccountNumber": "03001234567",
   "customerSubmittedTxnRef": null,
-  "payerIdentifier": null,
-  "payerIdentifierKind": null,
+  "payerIdentifier": "03009876543",
+  "payerIdentifierKind": "PayerWalletNumber",
   "customerAccountNumber": null,
   "customerWalletType": null,
-  "assignedAt": "2026-10-07T12:00:00Z",
-  "expiresAt": null,
+  "assignedAt": "2026-10-07T12:00:40Z",
+  "expiresAt": "2026-10-07T12:15:00Z",
   "paymentPageExpiresAt": "2026-10-07T12:15:00Z",
   "createdAt": "2026-10-07T12:00:00Z"
 }
@@ -692,10 +703,11 @@ For withdrawals, `customerAccountNumber` / `customerWalletType` are the customer
 `expiresAt` is the payout deadline, and `paymentAccount*` are `null` (the member picks the source account when
 confirming). `orderType` is always present, so a notification can be labelled Deposit / Withdrawal.
 
-For a QR deposit, `paymentAccountWalletType` is `JazzCashQR` / `EasypaisaQR` and, once the customer has submitted
-it, `payerIdentifier` / `payerIdentifierKind` (`PayerWalletNumber` \| `PayerIbanLastFour`) carry who they say paid —
-`customerSubmittedTxnRef` stays `null`. The app does not put the payer identifier in the toast for the event; it is
-read from the refetched order on Order Details.
+For a deposit, `paymentAccountWalletType` is the member's account type (one of the six payment methods) and
+`payerIdentifier` / `payerIdentifierKind` (`PayerWalletNumber`) carry the account the customer says they pay from —
+`customerSubmittedTxnRef` stays `null`. The order expires with the customer's checkout link (`paymentPageExpiresAt`,
+15 minutes after it was created) if it has not been confirmed by then. The app does not put the payer identifier in
+the toast for the event; it is read from the refetched order on Order Details.
 
 ### Get Pending Notifications & Open Orders
 
@@ -704,7 +716,7 @@ GET /api/member/orders/pending
 ```
 
 **Auth**: Bearer JWT required. REST recovery path (e.g. on app start): unacknowledged notifications (latest 50)
-plus **every open order assigned to you**, including deposits still awaiting customer checkout.
+plus **every open order assigned to you**, including deposits waiting for the customer's payment.
 
 **Response 200**
 ```json
@@ -786,7 +798,7 @@ account (**Account Number** / **Till ID** / **QR**). Each type is a deposit paym
 | JazzCash Till ID | `JazzCash` | `TillId` | `JazzCashTillID` (was `JazzCash`) |
 | JazzCash QR | `JazzCash` | `Qr` | `JazzCashQR` |
 | Easypaisa Account Number | `Easypaisa` | `AccountNumber` | `Easypaisa` |
-| Easypaisa Till ID | `Easypaisa` | `TillId` | `TillID` |
+| Easypaisa Till ID | `Easypaisa` | `TillId` | `EasypaisaTillID` |
 | Easypaisa QR | `Easypaisa` | `Qr` | `EasypaisaQR` |
 
 A **QR account** is registered by uploading the QR code image the member saved from their own JazzCash or Easypaisa
@@ -907,7 +919,7 @@ format hint and whether the type needs a QR code image.
     {
       "provider": "Easypaisa",
       "accountKind": "TillId",
-      "walletType": "TillID",
+      "walletType": "EasypaisaTillID",
       "label": "Easypaisa Till ID",
       "identifierLabel": "Till ID",
       "identifierHint": "A Till ID is 4 to 12 digits, numbers only.",
@@ -1316,14 +1328,14 @@ All list endpoints return the same paginated envelope:
 
 | Value                        | Description                                                                 |
 |------------------------------|-----------------------------------------------------------------------------|
-| `Awaiting`                   | Not assigned to a member yet (e.g. a withdrawal waiting for the customer's account details or for an eligible member) |
-| `Queued`                     | Merchant deposit assigned to you, waiting for the customer to open checkout (legacy orders: waiting for capacity) |
-| `AwaitingCustomerPayment`    | Customer is on the checkout page and should pay into your account           |
-| `AwaitingMemberConfirmation` | Customer submitted their transaction reference — confirm the deposit       |
+| `Awaiting`                   | Not assigned to a member yet (e.g. a withdrawal waiting for the customer's account details or for an eligible member, or a deposit whose checkout is looking for a member) |
+| `Queued`                     | Merchant deposit whose customer has not yet submitted the account they pay from: it has no member (orders created before this release: assigned to you, waiting for the customer to open checkout; legacy orders: waiting for capacity) |
+| `AwaitingCustomerPayment`    | Deposit assigned to you: the customer was shown your account. Confirm when the payment arrives from `payerIdentifier`, reject if it does not |
+| `AwaitingMemberConfirmation` | Orders created before this release: the customer submitted their transaction reference — confirm the deposit |
 | `AwaitingMemberPayout`       | Withdrawal assigned to you — pay out to the customer account                |
 | `Completed`                  | Confirmed by you (terminal)                                                 |
 | `Rejected`                   | Rejected by you                                                             |
-| `Expired`                    | Customer did not pay before checkout expired                                |
+| `Expired`                    | The deposit was not confirmed before the customer's checkout link expired (15 minutes after the order was created) |
 | `ManualReview`               | With an admin: escalated (e.g. not confirmed in time) or reported as an abnormal payment. Do not pay it again |
 | `Assigned`                   | Legacy: assigned — awaiting confirmation                                    |
 | `Frozen`                     | Legacy: freeze time passed — still awaiting confirmation                    |
@@ -1373,13 +1385,13 @@ The payment channel of an account or an order. Every registrable account type ha
 |------------------|-------------|----------------|---------------------------------|
 | `JazzCash`       | JazzCash account number | JazzCash Account Number | yes |
 | `Easypaisa`      | Easypaisa account number | Easypaisa Account Number | yes |
-| `TillID`         | Easypaisa Till ID (the long-standing name of that channel) | Easypaisa Till ID | yes |
+| `EasypaisaTillID` | Easypaisa Till ID (named `TillID` in earlier releases; that name is no longer sent or accepted) | Easypaisa Till ID | yes |
 | `BankAccount`    | Bank Account | legacy accounts only | yes |
 | `JazzCashTillID` | JazzCash Till ID — such an account's `walletType` used to be `JazzCash` | JazzCash Till ID | no — deposits only |
 | `JazzCashQR`     | JazzCash QR | JazzCash QR | no — deposits only |
 | `EasypaisaQR`    | Easypaisa QR | Easypaisa QR | no — deposits only |
 
-The app's withdrawal-request form still offers `Easypaisa`, `JazzCash`, `TillID` and `BankAccount` only.
+The app's withdrawal-request form still offers `Easypaisa`, `JazzCash`, `EasypaisaTillID` and `BankAccount` only.
 
 ### `PaymentAccountKind`
 
@@ -1393,14 +1405,14 @@ What identifies a member's wallet account (`accountKind` on accounts and orders,
 
 ### `OrderProofKind`
 
-`proofKind` on a deposit: what its customer submits so the member can find the payment. `payerIdentifierKind` is one
-of the last two.
+`proofKind` on a deposit: what its customer gave so the member can find the payment. Every new deposit is
+`PayerWalletNumber`; the other two only appear on orders created before this release.
 
-| Value                 | Member's account | Submitted value | In the field |
-|-----------------------|------------------|-----------------|--------------|
-| `TransactionIdDigits` | Account Number / Till ID | Last digits of the transaction ID | `customerSubmittedTxnRef` |
-| `PayerWalletNumber`   | JazzCash QR | The customer's JazzCash wallet number | `payerIdentifier` |
-| `PayerIbanLastFour`   | Easypaisa QR | The last 4 digits of the customer's Easypaisa IBAN | `payerIdentifier` |
+| Value                 | Orders | Member's account | Submitted value | In the field |
+|-----------------------|--------|------------------|-----------------|--------------|
+| `PayerWalletNumber`   | Every new deposit | Any of the six types | The customer's wallet account number — JazzCash for a JazzCash account, Easypaisa for an Easypaisa account | `payerIdentifier` |
+| `TransactionIdDigits` | Created before this release | Account Number / Till ID | Last digits of the transaction ID | `customerSubmittedTxnRef` |
+| `PayerIbanLastFour`   | Created before this release | Easypaisa QR | The last 4 digits of the customer's Easypaisa IBAN | `payerIdentifier` |
 
 ### `Currency`
 

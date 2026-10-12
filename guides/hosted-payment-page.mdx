@@ -5,7 +5,13 @@ description: "The C2C-hosted page your customer uses to pay a deposit, or to rec
 
 ## Overview
 
-Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **hosted payment page**. You don't build any payment UI: redirect your customer to the `paymentPageUrl` from the create-order response, and C2C walks them through paying the assigned member. This works the same for orders accepted as `Awaiting` (no eligible member at creation): the page assigns a member at checkout.
+Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **hosted payment page**. You don't build any payment UI: redirect your customer to the `paymentPageUrl` from the create-order response, and C2C walks them through the payment in three steps: they enter the wallet account they pay from, C2C assigns a member, and the page shows where to pay.
+
+No member is assigned when the order is created. A member, and the account the customer pays into, is assigned only after the customer has submitted the account they pay **from**. A customer who opens the link and leaves never occupies a member.
+
+<Warning>
+  **Changed behaviour.** The customer no longer enters a transaction ID (TID) or IBAN digits, and no longer taps **I've Completed Payment**. They give the wallet account they pay from **before** the payment details are shown, and there is nothing to submit after paying: the member confirms the order when the payment arrives from that account.
+</Warning>
 
 <Info>
   C2C has no separate "initiate checkout" endpoint. Creating a deposit order **is** creating the checkout session: one call returns both the order and its `paymentPageUrl`.
@@ -26,59 +32,88 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 | Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
 
 <Warning>
-  Redirect the customer as soon as you receive the URL. Don't cache it, email it hours later, or reuse it for another order. If the link expires, the order ends `Expired` (or `CancelledTimeout` if no member was ever assigned) and you receive an `order.failed` webhook. Create a **new** order with a new `Idempotency-Key`; you can reuse the same `merchantOrderRef`.
+  Redirect the customer as soon as you receive the URL. Don't cache it, email it hours later, or reuse it for another order. If the link expires before the payment is confirmed, the order ends `Expired` and you receive an `order.failed` webhook. Create a **new** order with a new `Idempotency-Key`; you can reuse the same `merchantOrderRef`.
 </Warning>
 
 ## What your customer sees
 
+The page has the same three steps for all six [payment methods](/guides/payment-methods): JazzCash and Easypaisa, each by account number, Till ID or QR code.
+
 <Steps>
-  <Step title="Open on your payment method">
-    The page shows your merchant name, the amount and the C2C order reference, and opens directly on the `walletType` you requested (for example JazzCash QR). The customer doesn't pick a method first. C2C reserves a receiving account of exactly that method, and the order moves to `AwaitingCustomerPayment`. If other methods are enabled for your account and available for the order, the customer can tap **Change** to pay with one of those instead.
+  <Step title="Enter the account they pay from">
+    The page shows your merchant name, the amount and the C2C order reference, and opens directly on the `walletType` you requested (for example JazzCash QR).
 
-    If the order is `Awaiting`, an online member is assigned at this point. If nobody with an account of that method is online yet, the page shows **"Finding an available agent…"** and re-checks automatically every 10 seconds until it can show where to pay or the link expires. The customer must not send money until an account number, Till ID or QR code is shown.
-  </Step>
-  <Step title="Pay and confirm">
-    The customer sends exactly the order amount from their own wallet app and confirms on the page. What the page shows and what the customer submits depend on the method: see [Account number and Till ID methods](#account-number-and-till-id-methods) and [QR methods](#qr-methods). In both cases the order moves to `AwaitingMemberConfirmation`.
+    The customer enters the **wallet account number they will pay from**: their JazzCash account for the JazzCash methods, their Easypaisa account for the Easypaisa methods. It is 11 digits starting with `03`, for example `03001234567`. The **Submit** button stays disabled until the number is valid.
 
-    Whatever the customer submits is their claim, not proof: the order completes only when the member confirms the money arrived.
+    The browser remembers the number, separately for JazzCash and Easypaisa, and pre-fills it on the customer's next payment. It is sent to C2C only when the customer submits it.
+
+    Until the customer submits, the order stays `Queued` and no member is assigned.
   </Step>
-  <Step title="Wait for verification">
-    The page waits while the member verifies the payment, and updates by itself to a success or a cancelled/expired screen. If you set `successUrl` / `failureUrl`, it then sends the customer back to your site. If the customer reloads or reopens the link meanwhile, the page resumes here instead of asking them to confirm again.
+  <Step title="A collection account is assigned">
+    Only now does C2C assign a member and that member's receiving account, of exactly the method being paid. If a member is free this takes a moment and the customer goes straight to the payment details.
+
+    If no member is free, the page shows **Assigning Collection Account** with a **10-second countdown** and keeps looking; the order is `Awaiting` meanwhile. If nobody becomes available within those 10 seconds, the order **fails** (`CancelledTimeout`) and the page shows **"Failed to assign the order to a member. Please check with support."**
+
+    The customer is never told why no member was available. You receive an `order.failed` webhook with the same text as its `reason`. To let the customer try again, create a new order: see [Retrying after a failed assignment](/guides/deposit-flow#retrying-after-a-failed-assignment).
+  </Step>
+  <Step title="Pay">
+    The page shows where to pay, and the order moves to `AwaitingCustomerPayment`. What it shows depends on the method: see [Account number and Till ID methods](#account-number-and-till-id-methods) and [QR methods](#qr-methods). The account holder's name is never shown.
+
+    The customer sends exactly the order amount from the account they entered, using their own wallet app. **There is nothing to submit afterwards**: no transaction ID, no IBAN digits and no "I've completed payment" button.
+
+    The member who received the money confirms the order when the payment arrives from the account the customer gave. The page then shows the confirmation by itself and, if you set `successUrl`, returns the customer to your site. If the customer reloads or reopens the link meanwhile, the page shows the same payment details again.
+
+    If the payment isn't confirmed before the link expires (15 minutes after the order was created), the order becomes `Expired`.
   </Step>
 </Steps>
 
 <Note>
-  If the assigned member goes offline before the customer opens the page, C2C can reassign the order to another available member at checkout. This is transparent to you: the `orderId` doesn't change. If the customer pays with a different method than you requested, your fee is re-quoted for the method used.
+  The account the customer enters is their claim, not proof. The order completes only when the member confirms that the money arrived. If the customer pays with a different method than you requested, your fee is re-quoted for the method used.
 </Note>
 
 ### Account number and Till ID methods
 
-`JazzCash`, `JazzCashTillID`, `Easypaisa` and `TillID`.
+`JazzCash`, `JazzCashTillID`, `Easypaisa` and `EasypaisaTillID`.
 
-The page shows the provider, the receiving **account number** or **Till ID** with a copy button, the exact amount to send, numbered steps for that provider's app and a **How to Pay** guide. The account holder's name isn't shown.
+The page shows:
 
-1. The customer copies the account number or Till ID.
-2. They pay exactly the order amount in their JazzCash or Easypaisa app.
-3. They enter the **last digits of the transaction ID** (TID) of that payment. The order's `txnRefDigitsRequired` sets how many digits (4 by default). The confirm button stays disabled until they have entered them.
+- **Only support JazzCash** or **Only support Easypaisa**: the provider the payment must be made with.
+- The receiving account number, or the **Account Till ID**, with a **Copy** button.
+- The amount to pay.
+- A tip: pay the exact amount, and always use the latest account number or Till ID shown for this order.
+- The route through the wallet app (below).
+- **Within 1 minute, the money will be credited automatically.**
 
-They can also attach a **screenshot of the payment** (optional; JPEG, PNG or WebP up to 5 MB), which the member sees when verifying.
+| Method | Route shown |
+|--------|-------------|
+| `JazzCash` | JazzCash App → Send Money → Enter account number → Finish payment |
+| `JazzCashTillID` | JazzCash App → QR Payment → Enter Till ID → Finish payment |
+| `Easypaisa` | Easypaisa App → Send Money → Enter account number → Finish payment |
+| `EasypaisaTillID` | Easypaisa App → Pay → Till Number → Finish payment |
+
+The Till ID methods (`JazzCashTillID`, `EasypaisaTillID`) also have a **How to Pay?** link that opens a guidance picture.
 
 ### QR methods
 
-`JazzCashQR` and `EasypaisaQR`. These methods never ask for a transaction ID, and `txnRefDigitsRequired` has no effect on them.
+`JazzCashQR` and `EasypaisaQR`.
 
-1. The customer first submits the **account they pay from**. For JazzCash QR that is their JazzCash account number (`03XXXXXXXXX`); for Easypaisa QR it is the last 4 digits of their Easypaisa IBAN. The member uses it to find the incoming payment.
-2. Only then does the page show the member's **QR code**, with a **Save QR** button. A button that opens the JazzCash or Easypaisa app is shown only when C2C has configured a verified app link for that provider.
-3. The customer scans the code in their JazzCash or Easypaisa app, or loads the saved image there, and pays exactly the order amount.
-4. They tap **I've Completed Payment**. They can attach an optional payment screenshot first, as above.
+The page shows:
 
-Until they tap **I've Completed Payment**, the customer can correct the account they entered. Afterwards it is final.
+- The member's **QR code** to scan.
+- **Save QR**, to save the code as an image.
+- An **Open JazzCash App** or **Open Easypaisa App** button, on phones only. It opens the wallet app's page in the phone's app store (Google Play or the App Store), where **Open** starts the installed app. A computer has no wallet app, so the button is not shown there.
+- **How to pay?**, which opens a guidance picture.
+- **Within 1 minute, money will reach your balance.**
 
-The page remembers the submitted account in that browser (local storage, separately for JazzCash and Easypaisa) and prefills it on the customer's next QR payment. Nothing is sent to C2C until the customer submits it, and they can clear it from the page.
+The customer scans the code in their JazzCash or Easypaisa app, or loads the saved image there, and pays exactly the order amount.
+
+### Changing the payment method
+
+The page opens directly on the `walletType` you requested and shows no method list. Only a link that names no method starts on the list of methods enabled for your account; a customer who picked one there can go back with **Pay another way** until they submit their account. The account they are asked for follows the method: a JazzCash account for a JazzCash method, an Easypaisa account for an Easypaisa method. Once an account number, Till ID or QR code has been shown, the order stays on that method and that account.
 
 ## Withdrawals
 
-For a [withdrawal](/api-reference/endpoints/create-withdrawal) the page works the other way round: the customer **receives** money, so it never shows an account to pay and never asks for a transaction ID.
+For a [withdrawal](/api-reference/endpoints/create-withdrawal) the page works the other way round: the customer **receives** money, so it never shows an account to pay and never asks which account they pay from.
 
 <Steps>
   <Step title="Enter the receiving account">
@@ -150,7 +185,8 @@ app.post('/checkout/c2c', async (req, res) => {
 
 - The page and its backend endpoints are operated by C2C. Your API key and secrets are never involved, and the customer never sees them.
 - The page never asks for the customer's wallet PIN or OTP. Customers pay from their own wallet app.
-- A payment screenshot is stored by C2C and shown only to the member assigned to the order and to C2C operations. It has no public link.
-- On the QR methods, the account the customer says they pay from is stored with the order for the member who verifies the payment. It isn't returned by the Merchant API or sent in webhooks.
+- The page never asks for a transaction ID or IBAN digits.
+- The account the customer says they pay from is stored with the order for the member who confirms the payment. It isn't returned by the Merchant API or sent in webhooks.
+- No member is assigned, and no receiving account is shown, until the customer has submitted the account they pay from.
 - On a withdrawal the page never shows a member's account, and shows the customer's own account masked after it was submitted.
 - Never build or modify payment page URLs yourself. Always use the `paymentPageUrl` returned by the API.

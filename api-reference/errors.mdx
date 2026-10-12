@@ -59,7 +59,7 @@ The API uses standard HTTP status codes. The body format depends on which layer 
 
 | Status | Meaning | Retry? |
 |--------|---------|--------|
-| `200` | Success. For order creation, also returned when an `Idempotency-Key` replay finds the existing order, and when no member is available yet (the order is accepted as `Awaiting`). | – |
+| `200` | Success. For order creation, also returned when an `Idempotency-Key` replay finds the existing order, and whether or not a member is available: a deposit is always accepted as `Queued`, and a withdrawal with no member available yet is accepted as `Awaiting`. | – |
 | `400` | Invalid request: validation failed (including amount precision), malformed JSON, unknown enum value, missing `Idempotency-Key`, or a status query without an order ID or `merchantOrderRef` | No. Fix the request first. |
 | `401` | API key missing or invalid (empty body), **or** request signature rejected (`code` in body) | No. Fix the credentials or signature. For `SIGNATURE_REPLAYED`, retry with the original `Idempotency-Key`. |
 | `403` | Merchant account not active, or caller IP not in your whitelist | No. Contact C2C. |
@@ -93,8 +93,8 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `400` | `Currency must be one of: PKR, INR, BDT.` | Unsupported currency |
 | `400` | `CustomerAccountName can only be sent together with CustomerAccountNumber.` | Withdrawal with an account holder name but no account number |
 | `400` | `CallbackUrl must be a valid absolute http(s) URL.` | Not an absolute `http://` / `https://` URL. Same for `SuccessUrl` / `FailureUrl`. |
-| `400` | `'Txn Ref Digits Required' must be between 4 and 8. You entered 3.` | `txnRefDigitsRequired` out of range. The option only concerns the account number and Till ID methods; the QR methods don't ask for transaction ID digits. |
-| `400` | `JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, TillID, BankAccount.` | Withdrawal with `walletType` `JazzCashTillID`, `JazzCashQR` or `EasypaisaQR`. See [Payment methods](/guides/payment-methods#withdrawals). |
+| `400` | `'Txn Ref Digits Required' must be between 4 and 8. You entered 3.` | `txnRefDigitsRequired` out of range. The field is deprecated and no longer used, but a value you send must still be `4` to `8`. |
+| `400` | `JazzCashQR is a deposit-only payment method. A withdrawal's walletType must be one of: JazzCash, Easypaisa, EasypaisaTillID, BankAccount.` | Withdrawal with `walletType` `JazzCashTillID`, `JazzCashQR` or `EasypaisaQR`. See [Payment methods](/guides/payment-methods#withdrawals). |
 | `400` | Problem details, `errors.Idempotency-Key` | Header missing |
 | `400` | Problem details, `errors.$.walletType` | Unknown `orderType` / `walletType` value |
 | `403` | `Merchant account is suspended; new orders are not accepted.` | Account not active |
@@ -105,7 +105,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `422` | `This Idempotency-Key was already used for a different order request.` | Same key, different `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` or `customerAccountNumber`. See [Idempotency](/api-reference/idempotency). |
 
 <Note>
-  There's no "no member available" error. When no eligible member is online, the order is accepted with status `Awaiting` and assigned later. See [Order status](/guides/order-status).
+  There's no "no member available" error on order creation. A deposit is always accepted as `Queued`: a member is looked for when the customer submits the account they pay from on the payment page, and if none can be assigned within about 10 seconds the order ends `CancelledTimeout`. A withdrawal with no eligible member online is accepted with status `Awaiting` and assigned later. See [Order status](/guides/order-status).
 </Note>
 
 ### Order status and balance

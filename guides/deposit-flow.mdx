@@ -62,7 +62,7 @@ Your merchant fee is fixed when the order is accepted. It's re-quoted only if th
 
 ### 2. Redirect the customer
 
-Send the customer to `paymentPageUrl` right away. The link is valid for **15 minutes**. See [Hosted payment page](/guides/hosted-payment-page).
+Send the customer to `paymentPageUrl` right away. The link is valid for **30 minutes**. See [Hosted payment page](/guides/hosted-payment-page).
 
 ### 3. Customer gives the account they pay from, and a member is assigned
 
@@ -88,7 +88,7 @@ The customer sends exactly the order amount from the account they gave, using th
 | `EasypaisaQR` | Their Easypaisa account number | The QR code to scan or save |
 | `BankAccount` | The wallet they pay from (JazzCash or Easypaisa) and its account number | The bank name, account title and account number to pay, each with a copy button |
 
-No transaction ID and no IBAN digits are asked for. After paying, the customer can tap **I have sent the payment**: the order then moves to `AwaitingMemberConfirmation` and the member is asked to check for the payment. Without it the order stays `AwaitingCustomerPayment` until the member acts. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
+No transaction ID and no IBAN digits are asked for, and the customer reports nothing after paying. The page has an **Open JazzCash Wallet** or **Open Easypaisa Wallet** button that takes them to their wallet app; using it doesn't change the order. The order stays `AwaitingCustomerPayment` until the member confirms or rejects it, or the link expires. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
 
 ### 5. Member confirms
 
@@ -96,7 +96,7 @@ The member sees the order in their app together with the account the customer ga
 
 - **Payment arrived, member confirms** → `Completed`. Your wallet is credited **amount − fee**, and an `order.completed` webhook is sent. The page shows the confirmation and returns the customer to your `successUrl`.
 - **Member reports that the payment did not arrive** → `Rejected`, and an `order.failed` webhook is sent.
-- **Not confirmed before the link expires** (15 minutes after the order was created) → `Expired`, and an `order.failed` webhook is sent.
+- **Not confirmed before the link expires** (30 minutes after the order was created) → `Expired`, and an `order.failed` webhook is sent.
 
 ### 6. Fulfil
 
@@ -136,14 +136,14 @@ A deposit normally goes straight from stage `Assigned` to `Completed`: the membe
 | Member confirms the payment | `Completed` | `order.completed` |
 | Member reports that the payment did not arrive | `Rejected` | `order.failed` |
 | No member could be assigned within 10 seconds of the customer submitting their account | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) |
-| The link expired (15 minutes) before the customer submitted their account, or before the member confirmed a payment | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
+| The link expired (30 minutes) before the customer submitted their account, or before the member confirmed a payment | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
 
 <Note>
   An `Expired` order can belong to a customer who did pay, but whose payment wasn't confirmed before the link expired. An order that failed can later be confirmed by C2C operations; you then receive `order.completed` after the earlier `order.failed`. See [Webhooks](/guides/webhooks#events).
 </Note>
 
 <Note>
-  `AwaitingMemberConfirmation` means the customer tapped **I have sent the payment** on the page and the member is verifying it. Such an order no longer expires with the checkout link; it moves to `ManualReview` if the member doesn't act in time.
+  `AwaitingMemberConfirmation` means the payment was reported as sent and the member is verifying it. The page no longer reports payments (its **I have sent the payment** button was removed), so an order reaches this status only when C2C operations set it. Such an order no longer expires with the checkout link; it moves to `ManualReview` if the member doesn't act in time.
 </Note>
 
 ### Retrying after a failed assignment
@@ -233,7 +233,7 @@ def on_c2c_order_update(order_id: str) -> None:
 - **Store `orderId` and your `Idempotency-Key`** with your order before you redirect.
 - **Use webhooks and reconcile:** every final outcome sends a webhook, but `ManualReview` doesn't until it's resolved, and deliveries can fail.
 - **Don't fulfil early:** `Queued`, `Awaiting` and `AwaitingCustomerPayment` are all in-progress states.
-- **Redirect straight away.** No member is held for the order until the customer submits their account, and the link is valid for 15 minutes only.
+- **Redirect straight away.** No member is held for the order until the customer submits their account, and the link is valid for 30 minutes only.
 - **Don't read `Queued` as "member assigned".** A new deposit is `Queued` with stage `Awaiting` until the customer starts; a member is assigned from `AwaitingCustomerPayment` on.
 - **Treat `ManualReview` as pending.** The customer may have paid, so don't ask them to pay again until C2C resolves it.
 - **One live order per `merchantOrderRef`.** To let the customer try again after a failed order, for example one that ended `CancelledTimeout` because no member could be assigned, create a new order (new `Idempotency-Key`); you can reuse the same `merchantOrderRef`.

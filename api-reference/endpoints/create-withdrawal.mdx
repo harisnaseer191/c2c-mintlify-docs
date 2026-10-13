@@ -146,7 +146,7 @@ You can give the customer's receiving account in two ways:
       The hosted page for this withdrawal. Required when you didn't send `customerAccountNumber`: the customer enters their account there. Otherwise optional: it shows the customer the progress of their payout.
     </ResponseField>
     <ResponseField name="expiresAt" type="string">
-      Expiry of `paymentPageUrl`, 15 minutes after creation. It **isn't** the payout deadline. A withdrawal created without `customerAccountNumber` ends `CancelledTimeout` if the customer hasn't entered their account by then.
+      Expiry of `paymentPageUrl`, 30 minutes after creation. It **isn't** the payout deadline. A withdrawal created without `customerAccountNumber` ends `CancelledTimeout` if the customer hasn't entered their account by then.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -365,13 +365,13 @@ When you create a withdrawal **without** `customerAccountNumber`:
 3. When the customer submits, C2C stores the account and assigns a member (`AwaitingMemberPayout`), or keeps the order `Awaiting` until a member is available (the 120-minute window starts then).
 4. The submitted account is final: it cannot be changed from the page afterwards. Submitting the same details twice has no further effect.
 
-If the customer doesn't submit their account before `expiresAt` (15 minutes), the order ends `CancelledTimeout`, the reservation is released and you receive an `order.failed` webhook (`reason`: `The customer did not provide their withdrawal account in time`). Create a new order to try again.
+If the customer doesn't submit their account before `expiresAt` (30 minutes), the order ends `CancelledTimeout`, the reservation is released and you receive an `order.failed` webhook (`reason`: `The customer did not provide their withdrawal account in time`). Create a new order to try again.
 
 ## Payout lifecycle
 
 ```text
 Awaiting (no account yet) ──customer submits account──▶ AwaitingMemberPayout, or Awaiting a member
-   └──not submitted within 15 min──▶ CancelledTimeout (order.failed webhook)
+   └──not submitted within 30 min──▶ CancelledTimeout (order.failed webhook)
 
 Awaiting ──member available──▶ AwaitingMemberPayout
    └──no member within 120 min──▶ CancelledTimeout (order.failed webhook)

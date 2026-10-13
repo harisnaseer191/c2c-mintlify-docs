@@ -149,6 +149,7 @@ GET /api/member/me
     "frozenBalance": 2000.00,
     "isOnline": true,
     "collectionsEnabled": true,
+    "withdrawalsEnabled": false,
     "status": "Active",
     "activePaymentAccounts": [
       {
@@ -171,6 +172,11 @@ GET /api/member/me
 `false` for now (server setting `MemberFinance:WithdrawalRequestsEnabled`). While it is `false`, or absent, the app
 shows a notice on the Withdraw tab instead of the form — "Withdrawal requests are not available right now. To withdraw
 your balance, use Payin/Collection…" with a **Go to Collections** button — and keeps the request history below it.
+
+`withdrawalsEnabled` is something else: the member's **Receive Withdrawals** switch, which decides whether they are
+given new withdrawal *orders* to pay out (see [Update Availability](#update-availability)). It is never `true`
+together with `collectionsEnabled`. The app shows it as a switch on the Payment List and locks each of the two
+switches, with the reason, while the other is on.
 
 **Response 401** — Not authenticated  
 **Response 404** — No member record found for this account
@@ -603,7 +609,9 @@ on the next connection.
 
 ### Who gets an order
 
-A member is eligible when they are **online** (`isOnline`, set through `PATCH /api/member/availability`), have **Collections enabled**, have
+A member is eligible when they are **online** (`isOnline`, set through `PATCH /api/member/availability`), have the
+**switch for the order's type on** — **Collections** (`collectionsEnabled`) for a deposit, **Receive Withdrawals**
+(`withdrawalsEnabled`) for a withdrawal — have
 a wallet account for the order (below), the order currency matches theirs, the amount is within their pay limit
 (deposits) / draw limit (withdrawals), they have a free slot under their concurrent-order limit, and — for
 deposits — their **available wallet balance covers the amount**.
@@ -793,26 +801,50 @@ PATCH /api/member/availability
 
 **Auth**: Bearer JWT required.
 
-Toggle your online/offline status or enable/disable order collection.
+Set your online/offline status and your two order switches:
 
-> **Note**: Enabling `collectionsEnabled` requires at least one approved payment account.
+| Field | Switch | While on (and online) |
+|---|---|---|
+| `collectionsEnabled` | Collections | you are given new **deposit** orders |
+| `withdrawalsEnabled` | Receive Withdrawals | you are given new **withdrawal** orders |
 
-**Request**
+**One order type at a time.** The two switches are never both on. A request that would leave both on is refused
+with `422` and changes nothing — turn the one that is on off first (or send it as `false` in the same request).
+Both may be off: you are then given no new orders. Orders you already hold are not affected by either switch —
+you can still confirm, reject or report them.
+
+> **Note**: Turning either switch on requires at least one approved payment account.
+
+**Request** — start receiving withdrawal orders
 ```json
 {
   "isOnline": true,
-  "collectionsEnabled": true
+  "withdrawalsEnabled": true
 }
 ```
 
-Both fields are optional — send only the ones you want to change.
+**Request** — go from deposits to withdrawals in one call
+```json
+{
+  "isOnline": true,
+  "collectionsEnabled": false,
+  "withdrawalsEnabled": true
+}
+```
+
+All fields are optional — send only the ones you want to change; a field left out stays as it is.
+
+**Response 422** — the other switch is on
+```json
+{ "error": "Turn Collections off before turning Receive Withdrawals on. A member takes deposits or withdrawals, not both at the same time." }
+```
 
 **Response 200**
 ```json
 { "data": true }
 ```
 
-**Response 422** — Cannot enable collections without an approved payment account
+**Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account
 
 ---
 

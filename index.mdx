@@ -68,7 +68,7 @@ flowchart LR
 | **Request signing** | MD5 `signature` field in the body. Always enforced for deposits and withdrawals. |
 | **Idempotency** | `Idempotency-Key` header required on order creation |
 | **Payment methods** | JazzCash and Easypaisa, each by account number, Till ID or QR code, for deposits; JazzCash, Easypaisa, Easypaisa Till ID and bank account for withdrawals (enabled per merchant). See [Payment methods](/guides/payment-methods). |
-| **Amount limits** | Per order and payment method: deposits 1,000 to 50,000 PKR by account number and 500 to 50,000 PKR by Till ID or QR code; withdrawals 1,000 to 50,000 PKR to Easypaisa and 500 to 50,000 PKR to JazzCash. See [Amount limits](/guides/payment-methods#amount-limits). |
+| **Amount limits** | Per order and payment method: deposits 1,000 to 50,000 PKR by account number and 300 to 50,000 PKR by Till ID or QR code; withdrawals 500 to 50,000 PKR to Easypaisa or JazzCash. See [Amount limits](/guides/payment-methods#amount-limits). |
 | **Currencies** | PKR (default), INR, BDT |
 | **Notifications** | Webhooks `order.completed` / `order.failed` + status polling |
 | **Rate limits** | None on the Merchant API |

@@ -49,7 +49,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
 <ParamField body="amount" type="number" required>
   Amount the customer pays, in `currency`. Must be greater than `0`, have at most 4 decimal places and be less than `100,000,000,000,000`.
 
-  It must also be within the [amount limit](/guides/payment-methods#amount-limits) of the `walletType`, both ends included: `1000` to `50000` for `JazzCash` and `Easypaisa`, `500` to `50000` for `JazzCashTillID`, `JazzCashQR`, `EasypaisaTillID` and `EasypaisaQR` (and for `BankAccount`, which is paid with one of those methods). An amount outside the limit is refused with `422` and the code `order.amountOutOfRange`.
+  It must also be within the [amount limit](/guides/payment-methods#amount-limits) of the `walletType`, both ends included: `1000` to `50000` for `JazzCash` and `Easypaisa`, `300` to `50000` for `JazzCashTillID`, `JazzCashQR`, `EasypaisaTillID` and `EasypaisaQR` (and for `BankAccount`, which is paid with one of those methods). An amount outside the limit is refused with `422` and the code `order.amountOutOfRange`.
 
   **Example:** `1500`
 </ParamField>

@@ -212,7 +212,7 @@
             }
           },
           "422": {
-            "description": "Withdrawal's amount + fee not covered by the merchant's available balance (which excludes withdrawals in progress, including Awaiting), payment method (walletType) disabled for the merchant and order type, amount outside the limit of the payment method (code order.amountOutOfRange; deposits per walletType: 1,000 to 50,000 PKR for JazzCash and Easypaisa, 500 to 50,000 PKR for the Till ID and QR methods; withdrawals per provider: 1,000 to 50,000 PKR for Easypaisa, 500 to 50,000 PKR for JazzCash), or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
+            "description": "Withdrawal's amount + fee not covered by the merchant's available balance (which excludes withdrawals in progress, including Awaiting), payment method (walletType) disabled for the merchant and order type, amount outside the limit of the payment method (code order.amountOutOfRange; deposits per walletType: 1,000 to 50,000 PKR for JazzCash and Easypaisa, 300 to 50,000 PKR for the Till ID and QR methods; withdrawals per provider: 500 to 50,000 PKR for Easypaisa and JazzCash), or Idempotency-Key already used with different terms (orderType, amount, walletType, currency, merchantOrderRef or customerAccountNumber).",
             "content": {
               "application/json": {
                 "schema": {
@@ -615,7 +615,7 @@
             "type": "number",
             "exclusiveMinimum": 0,
             "example": 1500,
-            "description": "At most 4 decimal places and less than 100,000,000,000,000. Must be within the amount limit of the payment method (both ends included), otherwise 422 with code order.amountOutOfRange. Deposits, per walletType: 1,000 to 50,000 PKR for JazzCash and Easypaisa; 500 to 50,000 PKR for JazzCashTillID, JazzCashQR, EasypaisaTillID and EasypaisaQR, and for BankAccount (paid with one of those methods). Withdrawals, per provider: 1,000 to 50,000 PKR for Easypaisa and EasypaisaTillID; 500 to 50,000 PKR for JazzCash; no limit for BankAccount."
+            "description": "At most 4 decimal places and less than 100,000,000,000,000. Must be within the amount limit of the payment method (both ends included), otherwise 422 with code order.amountOutOfRange. Deposits, per walletType: 1,000 to 50,000 PKR for JazzCash and Easypaisa; 300 to 50,000 PKR for JazzCashTillID, JazzCashQR, EasypaisaTillID and EasypaisaQR, and for BankAccount (paid with one of those methods). Withdrawals, per provider: 500 to 50,000 PKR for Easypaisa, EasypaisaTillID and JazzCash; no limit for BankAccount."
           },
           "walletType": {
             "$ref": "#/components/schemas/WalletType"

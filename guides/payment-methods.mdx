@@ -88,13 +88,13 @@ Every order must be for an amount within the limit of its payment method. A limi
 | `walletType` | Minimum (PKR) | Maximum (PKR) |
 |--------------|---------------|---------------|
 | `Easypaisa` | 1,000 | 50,000 |
-| `EasypaisaTillID` | 500 | 50,000 |
-| `EasypaisaQR` | 500 | 50,000 |
+| `EasypaisaTillID` | 300 | 50,000 |
+| `EasypaisaQR` | 300 | 50,000 |
 | `JazzCash` | 1,000 | 50,000 |
-| `JazzCashTillID` | 500 | 50,000 |
-| `JazzCashQR` | 500 | 50,000 |
+| `JazzCashTillID` | 300 | 50,000 |
+| `JazzCashQR` | 300 | 50,000 |
 
-A `BankAccount` deposit is paid with one of the six methods above, because bank accounts aren't offered on the payment page for now. Its amount must therefore be one that at least one of them accepts: 500 to 50,000 PKR.
+A `BankAccount` deposit is paid with one of the six methods above, because bank accounts aren't offered on the payment page for now. Its amount must therefore be one that at least one of them accepts: 300 to 50,000 PKR.
 
 ### Withdrawals (payout)
 
@@ -102,7 +102,7 @@ A withdrawal's limit is set by the provider of the customer's wallet.
 
 | Provider | `walletType` | Minimum (PKR) | Maximum (PKR) |
 |----------|--------------|---------------|---------------|
-| Easypaisa | `Easypaisa`, `EasypaisaTillID` | 1,000 | 50,000 |
+| Easypaisa | `Easypaisa`, `EasypaisaTillID` | 500 | 50,000 |
 | JazzCash | `JazzCash` | 500 | 50,000 |
 
 A `BankAccount` withdrawal has no amount limit.
@@ -119,8 +119,8 @@ Creating the order is refused with `422` and the code `order.amountOutOfRange`. 
 ```
 
 - Check the amount against the tables above before you create an order, and branch on `code` when the API refuses one. The `error` text states the limit in force and the amount you sent.
-- A deposit below 1,000 PKR can still be collected on a Till ID or QR method, whose minimum is 500 PKR.
-- The message of a withdrawal names the provider, for example `Easypaisa withdrawals must be between 1,000 and 50,000 PKR. The requested amount is 999 PKR.`
+- A deposit below 1,000 PKR can still be collected on a Till ID or QR method, whose minimum is 300 PKR.
+- The message of a withdrawal names the provider, for example `Easypaisa withdrawals must be between 500 and 50,000 PKR. The requested amount is 499 PKR.`
 - C2C can change these limits. An order that was already accepted isn't affected: it keeps its payment method, and a retry with its `Idempotency-Key` returns the original order.
 
 On the [hosted payment page](/guides/hosted-payment-page) a customer who chooses the method themselves is only offered the methods whose limit covers the order amount. The method you requested when you created the order always stays available to them.

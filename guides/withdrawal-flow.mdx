@@ -48,7 +48,7 @@ Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 - `orderType: "Withdrawal"`
 - `walletType`: the customer's receiving wallet or account type. One of `JazzCash`, `Easypaisa`, `EasypaisaTillID`, `BankAccount`; the other [payment methods](/guides/payment-methods) are deposit-only and rejected with `400`.
 - `customerAccountNumber`: where to send the money (optional: leave it out to have the customer enter it on the hosted page), and optionally `customerAccountName`, the name the account is held in
-- `amount`, within the [limit of the customer's provider](/guides/payment-methods#amount-limits): 1,000 to 50,000 PKR for an Easypaisa wallet, 500 to 50,000 PKR for JazzCash. Outside it the order is refused with `422` and the code `order.amountOutOfRange`.
+- `amount`, within the [limit of the customer's provider](/guides/payment-methods#amount-limits): 500 to 50,000 PKR for an Easypaisa or a JazzCash wallet. Outside it the order is refused with `422` and the code `order.amountOutOfRange`.
 - optional `currency`, `merchantOrderRef`, `callbackUrl`, `maxRetryCount`
 - a unique `Idempotency-Key` and a valid `signature` field. Withdrawals are always signature-enforced, and the signature covers the account number and amount, so they can't be changed in transit.
 

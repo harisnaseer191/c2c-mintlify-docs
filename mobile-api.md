@@ -215,6 +215,7 @@ GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
         "paymentAccountId": "8c6b1c3a...",
         "accountNumber": "03001234567",
         "accountHolderName": "Ali Hassan",
+        "bankName": null,
         "walletType": "JazzCash",
         "orderType": "Deposit",
         "status": "AwaitingCustomerPayment",
@@ -229,6 +230,7 @@ GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
         "proofKind": "PayerWalletNumber",
         "payerIdentifier": "03009876543",
         "payerIdentifierKind": "PayerWalletNumber",
+        "payerWalletProvider": "JazzCash",
         "payerIdentifierLabel": "Customer's JazzCash account number",
         "payerIdentifierSubmittedAt": "2026-06-07T10:00:00Z",
         "customerIdentifier": "CUST-1",
@@ -272,7 +274,7 @@ has **two parties**, and their accounts are separate fields:
 
 | Fields | Whose | Deposit | Withdrawal |
 |---|---|---|---|
-| `paymentAccountId`, `accountNumber`, `accountHolderName`, `walletType`, `accountKind`, `accountTypeLabel` | **the member** | the member's **receiving** account the customer pays into | the member's **source** account the payout was sent from — `null` until the member confirms |
+| `paymentAccountId`, `accountNumber`, `accountHolderName`, `bankName`, `walletType`, `accountKind`, `accountTypeLabel` | **the member** | the member's **receiving** account the customer pays into | the member's **source** account the payout was sent from — `null` until the member confirms |
 | `customerAccountNumber`, `customerAccountHolderName`, `customerWalletType` | **the customer** | `null` | the customer's wallet the payout is **sent to** (`customerAccountHolderName` may be `null`) |
 
 The app must show a withdrawal's destination from the `customer*` fields — never from `accountNumber`, which is the
@@ -281,15 +283,17 @@ member's own account.
 | Field | Meaning |
 |---|---|
 | `accountKind` | [`PaymentAccountKind`](#paymentaccountkind): `AccountNumber` \| `TillId` \| `Qr` — what identifies the member's account. Never `null` once the order has a member account (`null` only while `walletType` is `null`) |
-| `accountTypeLabel` | Display name of the member's account type, e.g. `"JazzCash Till ID"`, `"JazzCash QR"` (`null` when there is no account yet) |
-| `accountNumber` | The member's account number or Till ID. **QR deposit**: the wallet number / Till ID the member registered for that QR code |
+| `accountTypeLabel` | Display name of the member's account type, e.g. `"JazzCash Till ID"`, `"JazzCash QR"`, `"Direct Bank Account"` (`null` when there is no account yet) |
+| `accountNumber` | The member's account number or Till ID. **QR deposit**: the wallet number / Till ID the member registered for that QR code. **Bank Account deposit**: the member's bank account number or IBAN |
+| `bankName` | The bank of the member's own account when it is a bank account (`walletType: BankAccount`), e.g. `"Meezan Bank"`; `null` for every wallet account and while the order has no member account |
 | `commissionAmount` | The member's reward; `null` until it is known |
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
 | `proofKind` | **Deposit**: what the customer of this order gave so the member can find the payment — [`OrderProofKind`](#orderproofkind). `PayerWalletNumber` on every new deposit, whatever the payment method; `TransactionIdDigits` and `PayerIbanLastFour` only appear on orders created before this release. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
-| `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
+| `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method, and on a Bank Account deposit the JazzCash or Easypaisa wallet they send the bank transfer from (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
 | `payerIdentifierKind` | `PayerWalletNumber` \| `null` — what `payerIdentifier` is (`PayerIbanLastFour` only on orders created before this release) |
-| `payerIdentifierLabel` | What it is, in words, to label it with: `"Customer's JazzCash account number"` / `"Customer's Easypaisa account number"` (`null` when there is none) |
+| `payerWalletProvider` | **Deposit**: `JazzCash` \| `Easypaisa` \| `null` — the provider of the wallet the customer said they pay from (the wallet `payerIdentifier` is with). On a JazzCash or Easypaisa method it is the method's own provider; on a Bank Account deposit it is the wallet the customer chose on the checkout page. `null` for withdrawals and on orders whose customer submitted their account before this release |
+| `payerIdentifierLabel` | What it is, in words, to label it with: `"Customer's JazzCash account number"` / `"Customer's Easypaisa account number"` (`null` when there is none). On a Bank Account deposit it names the wallet in `payerWalletProvider` |
 | `payerIdentifierSubmittedAt` | When the customer submitted it |
 | `customerSubmittedTxnRef` | **Orders created before this release only** (`proofKind: TransactionIdDigits`): the last digits of the TID the customer *said* they paid with — a claim, **not verification**. The customer is no longer asked for a transaction ID, so it is `null` on every new order |
 | `customerSubmittedTxnRefAt` | When the customer submitted it (`null` on every new order) |
@@ -309,7 +313,7 @@ member's own account.
 
 #### What the customer submits (`proofKind`)
 
-On every deposit — all six payment methods — the customer gives **the wallet account number they pay from** on the
+On every deposit — all seven payment methods — the customer gives **the wallet account number they pay from** on the
 checkout page, **before** a member is assigned. A deposit therefore reaches the member in status
 `AwaitingCustomerPayment` with `allowedActions: ["Confirm", "Reject"]` and the payer account already on it:
 
@@ -318,7 +322,8 @@ checkout page, **before** a member is assigned. A deposit therefore reaches the 
 | `proofKind` | `PayerWalletNumber` |
 | `payerIdentifier` | The customer's wallet account number, e.g. `03009876543` |
 | `payerIdentifierKind` | `PayerWalletNumber` |
-| `payerIdentifierLabel` | `"Customer's JazzCash account number"` (JazzCash Account Number / Till ID / QR) or `"Customer's Easypaisa account number"` (Easypaisa Account Number / Till ID / QR) |
+| `payerWalletProvider` | `JazzCash` or `Easypaisa`: the provider of that wallet |
+| `payerIdentifierLabel` | `"Customer's JazzCash account number"` (JazzCash Account Number / Till ID / QR) or `"Customer's Easypaisa account number"` (Easypaisa Account Number / Till ID / QR). Direct Bank Account: whichever of the two the customer pays from |
 | `payerIdentifierSubmittedAt` | When the customer submitted it |
 
 No transaction ID and no IBAN digits are asked for. The member **confirms** when a payment of the order's amount
@@ -332,9 +337,18 @@ to `ManualReview` instead when the member does not decide within their confirmat
 last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
 release.
 
+**Bank Account deposits.** The customer pays the member's bank account by bank transfer **from their JazzCash or
+Easypaisa wallet**. On the checkout page they choose that wallet and enter its account number, so `payerIdentifier` is
+a wallet number (`03XXXXXXXXX`) here too — never a bank account number — and `payerWalletProvider` says which wallet
+it is with: `payerIdentifierLabel` reads `"Customer's JazzCash account number"` or `"Customer's Easypaisa account
+number"`. The order's own `bankName`, `accountHolderName` (the account title) and `accountNumber` are what the
+customer was shown to pay, and Order Details shows the bank name with the receiving account. The member looks for a
+transfer of the order's amount from that wallet among the payments received in their bank account.
+
 On Order Details and in the confirm sheet the value sits under **"Customer-submitted payment (not verified)"**, with a
 Copy button and the time it was submitted. It is a verification aid — the member looks for a payment of the order
-amount from that sender in their own wallet app — and not proof. The app shows a payer identifier only on the assigned
+amount from that sender in their own wallet app, or in their banking app for a deposit into a Direct Bank
+Account — and not proof. The app shows a payer identifier only on the assigned
 member's own order screens — never in a toast, a notification or a log.
 
 ---
@@ -372,10 +386,11 @@ POST /api/member/orders/{id}/confirm
 
 `memberTxnRefNo` — optional for deposits: the member's own reference, e.g. the last digits of the incoming
 transaction ID (at most 20 characters). The app sends it only when the member typed one. A deposit can be confirmed
-as soon as it is assigned (`AwaitingCustomerPayment`): before confirming, look in your wallet app for a payment of the
+as soon as it is assigned (`AwaitingCustomerPayment`): before confirming, look in your wallet app (your banking app for a
+Direct Bank Account) for a payment of the
 order's amount from `payerIdentifier` (see [What the customer submits](#what-the-customer-submits-proofkind)) — it is
 the customer's claim, not proof. Confirm when that payment has arrived; [reject](#reject-order) if it has not. The
-request is the same for all six payment methods and sends no payer identifier back. (On an order created before this
+request is the same for all seven payment methods and sends no payer identifier back. (On an order created before this
 release with `proofKind: TransactionIdDigits`, compare `customerSubmittedTxnRef` instead.)
 
 **Request — withdrawal** (both fields required)
@@ -601,18 +616,21 @@ has open no longer decides who is next — only whether they are still under the
 
 | Order | Customer's payment method / wallet | Member account needed |
 |---|---|---|
-| Deposit | One of the six methods: JazzCash Account Number, JazzCash Till ID, JazzCash QR, Easypaisa Account Number, Easypaisa Till ID, Easypaisa QR | An account **of that same type** (the same `walletType`) that is approved, **switched on** and not on hold (`canReceiveDeposits`). A QR deposit needs a QR account of that provider — its QR code is what the customer scans |
+| Deposit | One of the six wallet methods: JazzCash Account Number, JazzCash Till ID, JazzCash QR, Easypaisa Account Number, Easypaisa Till ID, Easypaisa QR | An account **of that same type** (the same `walletType`) that is approved, **switched on** and not on hold (`canReceiveDeposits`). A QR deposit needs a QR account of that provider — its QR code is what the customer scans |
+| Deposit | Bank Account — the customer pays by bank transfer from their JazzCash or Easypaisa wallet | A **Direct Bank Account** (`walletType: BankAccount`) that is approved, **switched on** and not on hold (`canReceiveDeposits`) |
 | Withdrawal | JazzCash | A JazzCash account that is approved and not on hold (`canFundWithdrawals`; the receive-deposits switch does not matter) |
 | Withdrawal | Easypaisa | An Easypaisa account with `canFundWithdrawals` |
 
-A member with only JazzCash accounts is never given an Easypaisa order, and the other way round.
+A member with only JazzCash accounts is never given an Easypaisa order, and the other way round. A Bank Account
+deposit is the one route that crosses providers — the money leaves the customer's JazzCash or Easypaisa wallet and
+arrives in the member's bank account — and it is only ever given to a member with a Direct Bank Account.
 
 Withdrawals the member does not pay out in time are reassigned to another member (the previous member
 receives `OrderReassigned`, the new one `OrderAssigned`).
 
 **Deposits and the customer checkout.** A deposit has no member while its customer has not started. On the checkout
 page the customer first enters the wallet account number they pay from; only then is an eligible **online** member
-assigned and that member's account number, Till ID or QR code shown to the customer. The order reaches the member
+assigned and that member's account number, Till ID, QR code or bank account shown to the customer. The order reaches the member
 with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier`. If no
 member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
 Once an account has been shown the order never moves — the customer may already have paid — and the member can
@@ -695,9 +713,11 @@ is the fixed member-safe hold text while the account is on hold. On this event t
   "paymentAccountId": "…",
   "paymentAccountWalletType": "JazzCash",
   "paymentAccountNumber": "03001234567",
+  "paymentAccountBankName": null,
   "customerSubmittedTxnRef": null,
   "payerIdentifier": "03009876543",
   "payerIdentifierKind": "PayerWalletNumber",
+  "payerWalletProvider": "JazzCash",
   "customerAccountNumber": null,
   "customerWalletType": null,
   "assignedAt": "2026-10-07T12:00:40Z",
@@ -711,9 +731,11 @@ For withdrawals, `customerAccountNumber` / `customerWalletType` are the customer
 `expiresAt` is the payout deadline, and `paymentAccount*` are `null` (the member picks the source account when
 confirming). `orderType` is always present, so a notification can be labelled Deposit / Withdrawal.
 
-For a deposit, `paymentAccountWalletType` is the member's account type (one of the six payment methods) and
+For a deposit, `paymentAccountWalletType` is the member's account type (one of the seven payment methods) and
 `payerIdentifier` / `payerIdentifierKind` (`PayerWalletNumber`) carry the account the customer says they pay from —
-`customerSubmittedTxnRef` stays `null`. The order expires with the customer's checkout link (`paymentPageExpiresAt`,
+`customerSubmittedTxnRef` stays `null`. `payerWalletProvider` (`JazzCash` | `Easypaisa`) is the provider of that
+wallet, and `paymentAccountBankName` the bank of the member's account when it is a bank account (`null` for every
+wallet account). The order expires with the customer's checkout link (`paymentPageExpiresAt`,
 15 minutes after it was created) if it has not been confirmed by then. The app does not put the payer identifier in
 the toast for the event; it is read from the refetched order on Order Details.
 
@@ -796,9 +818,9 @@ Both fields are optional — send only the ones you want to change.
 
 ## Payment Accounts
 
-A member registers wallet accounts of **six types** — a **provider** (JazzCash / Easypaisa) and what identifies the
-account (**Account Number** / **Till ID** / **QR**). Each type is a deposit payment method of its own, with its own
-`walletType`:
+A member registers accounts of **seven types**: six wallet types — a **provider** (JazzCash / Easypaisa) and what
+identifies the account (**Account Number** / **Till ID** / **QR**) — and the **Direct Bank Account**. Each type is a
+deposit payment method of its own, with its own `walletType`:
 
 | Type | `provider` | `accountKind` | `walletType` |
 |---|---|---|---|
@@ -808,10 +830,18 @@ account (**Account Number** / **Till ID** / **QR**). Each type is a deposit paym
 | Easypaisa Account Number | `Easypaisa` | `AccountNumber` | `Easypaisa` |
 | Easypaisa Till ID | `Easypaisa` | `TillId` | `EasypaisaTillID` |
 | Easypaisa QR | `Easypaisa` | `Qr` | `EasypaisaQR` |
+| Direct Bank Account | `Bank` | `AccountNumber` | `BankAccount` |
 
 A **QR account** is registered by uploading the QR code image the member saved from their own JazzCash or Easypaisa
 wallet app, together with the wallet number or Till ID that QR code belongs to. An admin approves it like any other
 account, and customers of a QR deposit scan that image.
+
+A **Direct Bank Account** is the member's own bank account. It is registered with the name of its bank (`bankName`),
+its account number or IBAN (`accountNumber`) and its account title (`accountHolderName`). Customers of a Bank Account
+deposit pay it by bank transfer from their JazzCash or Easypaisa wallet, and — unlike a wallet account, whose holder
+name is never shown to a customer — they are shown its bank name, account title and account number. Approval, the
+receive-deposits switch, an admin's hold and removal work exactly as for the other types: only a bank account that is
+approved, switched on and not on hold receives Bank Account deposits.
 
 Every new or amended account is `Pending` until an admin approves it. Approval does not switch the account on: it is
 `SwitchedOff` until the member turns "receive deposits" on.
@@ -829,6 +859,7 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
   "accountTypeLabel": "JazzCash Account Number",
   "accountNumber": "03001234567",
   "accountHolderName": "Ali Hassan",
+  "bankName": null,
   "status": "Approved",
   "isActive": true,
   "effectiveStatus": "Active",
@@ -853,11 +884,13 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
 
 | Field | Meaning |
 |---|---|
-| `provider` | `JazzCash` \| `Easypaisa` (`Bank` only on legacy accounts) |
-| `accountKind` | [`PaymentAccountKind`](#paymentaccountkind): `AccountNumber` \| `TillId` \| `Qr`. Never `null` |
-| `accountTypeLabel` | Display name, e.g. `"Easypaisa Till ID"`, `"JazzCash QR"` |
+| `provider` | `JazzCash` \| `Easypaisa` \| `Bank` (a Direct Bank Account) |
+| `accountKind` | [`PaymentAccountKind`](#paymentaccountkind): `AccountNumber` \| `TillId` \| `Qr`. Never `null`. A bank account is an `AccountNumber` |
+| `accountTypeLabel` | Display name, e.g. `"Easypaisa Till ID"`, `"JazzCash QR"`, `"Direct Bank Account"` |
 | `walletType` | The payment channel the account is matched under — one per type, see the table above and [`WalletType`](#wallettype) |
-| `accountNumber` | The account number or Till ID. For a QR account: the wallet number (`03XXXXXXXXX`) or Till ID the QR code belongs to |
+| `accountNumber` | The account number or Till ID. For a QR account: the wallet number (`03XXXXXXXXX`) or Till ID the QR code belongs to. For a bank account: the bank account number or IBAN |
+| `accountHolderName` | The account holder's name. For a bank account: the account title |
+| `bankName` | Bank accounts: the bank the account is with, e.g. `"Meezan Bank"`. `null` for every wallet account |
 | `hasQrImage` | QR accounts: whether a QR code image is stored (`false` for every other type). Fetch it from [Get Payment Account QR Image](#get-payment-account-qr-image) |
 | `qrImageUploadedAt` | When the stored QR code was uploaded; `null` without one |
 | `status` | The approval state: [`PaymentAccountStatus`](#paymentaccountstatus) |
@@ -881,8 +914,8 @@ GET /api/member/payment-account-types
 
 **Auth**: Bearer JWT required.
 
-The six account types a member can register, in the order they are offered, with each identifier's label and
-format hint and whether the type needs a QR code image.
+The seven account types a member can register, in the order they are offered, with each identifier's label and
+format hint, whether the type needs a QR code image and whether it needs the name of a bank.
 
 **Response 200**
 ```json
@@ -895,7 +928,8 @@ format hint and whether the type needs a QR code image.
       "label": "JazzCash Account Number",
       "identifierLabel": "Account number",
       "identifierHint": "Enter the 11-digit mobile account number, for example 03001234567.",
-      "requiresQrImage": false
+      "requiresQrImage": false,
+      "requiresBankName": false
     },
     {
       "provider": "JazzCash",
@@ -904,7 +938,8 @@ format hint and whether the type needs a QR code image.
       "label": "JazzCash Till ID",
       "identifierLabel": "Till ID",
       "identifierHint": "A Till ID is 4 to 12 digits, numbers only.",
-      "requiresQrImage": false
+      "requiresQrImage": false,
+      "requiresBankName": false
     },
     {
       "provider": "JazzCash",
@@ -913,7 +948,8 @@ format hint and whether the type needs a QR code image.
       "label": "JazzCash QR",
       "identifierLabel": "Wallet number or Till ID of the QR",
       "identifierHint": "Enter the wallet number (11 digits, for example 03001234567) or the Till ID (4 to 12 digits) the QR code belongs to.",
-      "requiresQrImage": true
+      "requiresQrImage": true,
+      "requiresBankName": false
     },
     {
       "provider": "Easypaisa",
@@ -922,7 +958,8 @@ format hint and whether the type needs a QR code image.
       "label": "Easypaisa Account Number",
       "identifierLabel": "Account number",
       "identifierHint": "Enter the 11-digit mobile account number, for example 03001234567.",
-      "requiresQrImage": false
+      "requiresQrImage": false,
+      "requiresBankName": false
     },
     {
       "provider": "Easypaisa",
@@ -931,7 +968,8 @@ format hint and whether the type needs a QR code image.
       "label": "Easypaisa Till ID",
       "identifierLabel": "Till ID",
       "identifierHint": "A Till ID is 4 to 12 digits, numbers only.",
-      "requiresQrImage": false
+      "requiresQrImage": false,
+      "requiresBankName": false
     },
     {
       "provider": "Easypaisa",
@@ -940,14 +978,27 @@ format hint and whether the type needs a QR code image.
       "label": "Easypaisa QR",
       "identifierLabel": "Wallet number or Till ID of the QR",
       "identifierHint": "Enter the wallet number (11 digits, for example 03001234567) or the Till ID (4 to 12 digits) the QR code belongs to.",
-      "requiresQrImage": true
+      "requiresQrImage": true,
+      "requiresBankName": false
+    },
+    {
+      "provider": "Bank",
+      "accountKind": "AccountNumber",
+      "walletType": "BankAccount",
+      "label": "Direct Bank Account",
+      "identifierLabel": "Account number",
+      "identifierHint": "Enter the bank account number or IBAN: 8 to 34 letters and digits.",
+      "requiresQrImage": false,
+      "requiresBankName": true
     }
   ]
 }
 ```
 
-The app keeps a built-in copy of these six (`FALLBACK_ACCOUNT_TYPES`) for when the call fails. When
-`requiresQrImage` is `true` the add-account form shows the "Upload QR code" control and sends `qrImageBase64`.
+The app keeps a built-in copy of these seven (`FALLBACK_ACCOUNT_TYPES`) for when the call fails. When
+`requiresQrImage` is `true` the add-account form shows the "Upload QR code" control and sends `qrImageBase64`. When
+`requiresBankName` is `true` (the Direct Bank Account only) the form shows a "Bank name" field and sends `bankName`,
+and labels the holder name "Account title".
 
 ---
 
@@ -994,12 +1045,24 @@ MemberId is derived from JWT — do not send it in the body.
 }
 ```
 
+**Request — bank account (Direct Bank Account)**
+```json
+{
+  "provider": "Bank",
+  "accountType": "AccountNumber",
+  "bankName": "Meezan Bank",
+  "accountNumber": "02564827456375",
+  "accountHolderName": "Ali Hassan"
+}
+```
+
 | Field | |
 |---|---|
-| `provider` | `JazzCash` \| `Easypaisa` |
-| `accountType` | `AccountNumber` \| `TillId` \| `Qr` |
-| `accountNumber` | The identifier. **Account number**: 11 digits `03XXXXXXXXX` (`+92…` / `92…` forms and spaces/dashes are normalised). **Till ID**: 4–12 digits. **QR**: the wallet number (`03XXXXXXXXX`, normalised the same way) **or** the Till ID (4–12 digits) the QR code belongs to |
-| `accountHolderName` | Required, at most 200 characters |
+| `provider` | `JazzCash` \| `Easypaisa` \| `Bank` |
+| `accountType` | `AccountNumber` \| `TillId` \| `Qr`. A bank account (`provider: "Bank"`) is an `AccountNumber` |
+| `accountNumber` | The identifier. **Account number**: 11 digits `03XXXXXXXXX` (`+92…` / `92…` forms and spaces/dashes are normalised). **Till ID**: 4–12 digits. **QR**: the wallet number (`03XXXXXXXXX`, normalised the same way) **or** the Till ID (4–12 digits) the QR code belongs to. **Bank account**: the bank account number or IBAN, 8–34 letters and digits (spaces/dashes are removed) |
+| `accountHolderName` | Required, at most 200 characters. For a bank account: the account title |
+| `bankName` | **Bank account only — required.** The name of the bank the account is with, e.g. `Meezan Bank`, at most 100 characters. Ignored for every other type |
 | `qrImageBase64` | **`Qr` only — required when adding.** The QR code image as base64 (a `data:image/…;base64,` prefix is accepted; the app sends the bare base64). JPEG, PNG or WebP, at most 5 MB, at least 200×200 px. Sending it with any other `accountType` is a 400 |
 
 (`walletType` alone is still accepted from older app versions.)
@@ -1018,6 +1081,10 @@ uploading — with the API's own messages — and shows the API's message in the
   - `The image could not be read. Save the QR code from your wallet app again and upload that file.`
   - `Only a QR account takes a QR code image.` (`qrImageBase64` sent with another `accountType`)
 
+  A bank account without a usable `bankName` is a 400 too:
+  - `Enter the name of the bank the account is with, for example Meezan Bank.` (`bankName` missing or blank)
+  - `The bank name can be at most 100 characters.`
+
 **Response 404** — Member not found
 
 ---
@@ -1031,7 +1098,8 @@ PUT /api/member/payment-accounts/{id}
 **Auth**: Bearer JWT required. Same body as [Add Payment Account](#add-payment-account).
 
 Amends one of the member's own accounts. **Any change returns it to `Pending`** (switched off, approval
-invalidated) until an admin approves the new details; sending the same details changes nothing.
+invalidated) until an admin approves the new details; sending the same details changes nothing. Changing the
+`bankName` of a bank account is an amendment like any other.
 
 For a QR account `qrImageBase64` is **optional**:
 
@@ -1279,8 +1347,10 @@ GET /api/platform-accounts/active
 
 No authentication required. Shows the platform's recharge accounts that members should send money to when submitting a recharge request.
 
-In the app each account has a **Copy** button that puts its `accountNumber` on the clipboard, to paste into the wallet
-app. Copying does not select the account; tapping the row does.
+On the app's Deposit (recharge) screen every account — JazzCash, Easypaisa or bank — is shown as three separate
+fields: **Bank Name** (`bankDisplayName`), **Account Number** (`accountNumber`) and **Account Title**
+(`accountHolderName`). Each field has its own **Copy** button, which puts that value on the clipboard, to paste into
+the wallet or banking app, and confirms with "Copied". Copying does not select the account; tapping the card does.
 
 **Response 200**
 ```json
@@ -1291,11 +1361,27 @@ app. Copying does not select the account; tapping the row does.
       "walletType": "JazzCash",
       "accountNumber": "03009998877",
       "accountHolderName": "C2C Platform",
+      "bankName": null,
+      "bankDisplayName": "JazzCash",
+      "isActive": true
+    },
+    {
+      "id": "5b7c3e9f-...",
+      "walletType": "BankAccount",
+      "accountNumber": "02564827456375",
+      "accountHolderName": "Arsalan",
+      "bankName": "Meezan",
+      "bankDisplayName": "Meezan",
       "isActive": true
     }
   ]
 }
 ```
+
+| Field | Meaning |
+|---|---|
+| `bankName` | The bank name as stored: always there for a `BankAccount`, optional (`null`) for a JazzCash or Easypaisa account |
+| `bankDisplayName` | What to show as "Bank Name": `bankName` when one is stored, otherwise the wallet provider's name — `"JazzCash"` or `"Easypaisa"`. Never empty |
 
 ---
 
@@ -1408,7 +1494,7 @@ The payment channel of an account or an order. Every registrable account type ha
 | `JazzCash`       | JazzCash account number | JazzCash Account Number | yes |
 | `Easypaisa`      | Easypaisa account number | Easypaisa Account Number | yes |
 | `EasypaisaTillID` | Easypaisa Till ID (named `TillID` in earlier releases; that name is no longer sent or accepted) | Easypaisa Till ID | yes |
-| `BankAccount`    | Bank Account | legacy accounts only | yes |
+| `BankAccount`    | Bank account — a deposit on it is paid by bank transfer from the customer's JazzCash or Easypaisa wallet | Direct Bank Account | yes |
 | `JazzCashTillID` | JazzCash Till ID — such an account's `walletType` used to be `JazzCash` | JazzCash Till ID | no — deposits only |
 | `JazzCashQR`     | JazzCash QR | JazzCash QR | no — deposits only |
 | `EasypaisaQR`    | Easypaisa QR | Easypaisa QR | no — deposits only |
@@ -1421,7 +1507,7 @@ What identifies a member's wallet account (`accountKind` on accounts and orders,
 
 | Value           | The identifier (`accountNumber`) is | QR code image |
 |-----------------|--------------------------------------|---------------|
-| `AccountNumber` | An 11-digit mobile account number, `03XXXXXXXXX` | no |
+| `AccountNumber` | An 11-digit mobile account number, `03XXXXXXXXX`. Direct Bank Account: the bank account number or IBAN, 8–34 letters and digits | no |
 | `TillId`        | A Till ID, 4–12 digits | no |
 | `Qr`            | The wallet number (`03XXXXXXXXX`) or Till ID (4–12 digits) the QR code belongs to | required (`qrImageBase64`) |
 
@@ -1432,7 +1518,7 @@ What identifies a member's wallet account (`accountKind` on accounts and orders,
 
 | Value                 | Orders | Member's account | Submitted value | In the field |
 |-----------------------|--------|------------------|-----------------|--------------|
-| `PayerWalletNumber`   | Every new deposit | Any of the six types | The customer's wallet account number — JazzCash for a JazzCash account, Easypaisa for an Easypaisa account | `payerIdentifier` |
+| `PayerWalletNumber`   | Every new deposit | Any of the seven types | The customer's wallet account number — JazzCash for a JazzCash account, Easypaisa for an Easypaisa account, either of the two for a Direct Bank Account (`payerWalletProvider` says which) | `payerIdentifier` |
 | `TransactionIdDigits` | Created before this release | Account Number / Till ID | Last digits of the transaction ID | `customerSubmittedTxnRef` |
 | `PayerIbanLastFour`   | Created before this release | Easypaisa QR | The last 4 digits of the customer's Easypaisa IBAN | `payerIdentifier` |
 

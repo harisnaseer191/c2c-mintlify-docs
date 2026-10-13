@@ -27,7 +27,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 |----------|--------|
 | Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
 | Lifetime | **15 minutes** from order creation (`expiresAt` in the response) |
-| Wallet | `wallet` is the [payment method](/guides/payment-methods) (`walletType`) you requested: `jazzcash`, `jazzcashtillid`, `jazzcashqr`, `easypaisa`, `tillid` or `easypaisaqr`. The page opens directly on that method. A `BankAccount` deposit carries `wallet=bank`; bank accounts aren't offered on the page for now, so that link opens on the list of available methods instead. `wallet` isn't part of the signature. |
+| Wallet | `wallet` is the [payment method](/guides/payment-methods) (`walletType`) you requested: `jazzcash`, `jazzcashtillid`, `jazzcashqr`, `easypaisa`, `easypaisatillid`, `easypaisaqr` or `bank` (a `BankAccount` deposit). The page opens directly on that method. `wallet` isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
 | Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
 
@@ -37,15 +37,15 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 
 ## What your customer sees
 
-The page has the same three steps for all six [payment methods](/guides/payment-methods): JazzCash and Easypaisa, each by account number, Till ID or QR code.
+The page has the same three steps for all seven [payment methods](/guides/payment-methods): JazzCash and Easypaisa, each by account number, Till ID or QR code, and Bank Account.
 
 <Steps>
   <Step title="Enter the account they pay from">
     The page shows your merchant name, the amount and the C2C order reference, and opens directly on the `walletType` you requested (for example JazzCash QR).
 
-    The customer enters the **wallet account number they will pay from**: their JazzCash account for the JazzCash methods, their Easypaisa account for the Easypaisa methods. It is 11 digits starting with `03`, for example `03001234567`. The **Submit** button stays disabled until the number is valid.
+    The customer enters the **wallet account number they will pay from**: their JazzCash account for the JazzCash methods, their Easypaisa account for the Easypaisa methods. On Bank Account they first choose the wallet they pay from, JazzCash or Easypaisa, and enter that wallet's account number. It is 11 digits starting with `03`, for example `03001234567`; a number typed as `+92…` or `92…` is accepted and stored in its `03` form. The **Submit** button stays disabled until the number is valid.
 
-    The browser remembers the number, separately for JazzCash and Easypaisa, and pre-fills it on the customer's next payment. It is sent to C2C only when the customer submits it.
+    The browser remembers the number, separately for JazzCash and Easypaisa, and pre-fills it on the customer's next payment. On Bank Account it also remembers which wallet they chose. It is sent to C2C only when the customer submits it.
 
     Until the customer submits, the order stays `Queued` and no member is assigned.
   </Step>
@@ -57,7 +57,7 @@ The page has the same three steps for all six [payment methods](/guides/payment-
     The customer is never told why no member was available. You receive an `order.failed` webhook with the same text as its `reason`. To let the customer try again, create a new order: see [Retrying after a failed assignment](/guides/deposit-flow#retrying-after-a-failed-assignment).
   </Step>
   <Step title="Pay">
-    The page shows where to pay, and the order moves to `AwaitingCustomerPayment`. What it shows depends on the method: see [Account number and Till ID methods](#account-number-and-till-id-methods) and [QR methods](#qr-methods). The account holder's name is never shown.
+    The page shows where to pay, and the order moves to `AwaitingCustomerPayment`. What it shows depends on the method: see [Account number and Till ID methods](#account-number-and-till-id-methods), [QR methods](#qr-methods) and [Bank account](#bank-account). A wallet account holder's name is never shown; a bank account is shown with its bank name and account title.
 
     The customer sends exactly the order amount from the account they entered, using their own wallet app. No transaction ID and no IBAN digits are asked for.
 
@@ -115,9 +115,35 @@ The page shows:
 
 The customer scans the code in their JazzCash or Easypaisa app, or loads the saved image there, and pays exactly the order amount.
 
+### Bank account
+
+`BankAccount`.
+
+The customer pays a member's bank account by **bank transfer from their JazzCash or Easypaisa wallet**. The three steps are the same as on the other methods; two things differ.
+
+On the first step the page shows two tiles, **JazzCash** and **Easypaisa**. The customer chooses the wallet they pay from and enters that wallet's account number. The wallet and the number they used last are selected and pre-filled, so a returning customer only confirms them.
+
+Once a bank account is assigned, the page shows:
+
+- The bank account to pay, as three separate fields, each with its own **Copy** button: **Bank name**, **Account title** and **Account No.**
+- The **Transfer amount**.
+- A tip: make sure the transfer amount matches exactly, and use the latest bank account shown for this order.
+- The route through each wallet app (below), starting with the wallet the customer pays from.
+- **Within 1 minute, the money will be credited automatically.**
+- The **I have sent the payment** button.
+
+| The customer pays from | Route shown |
+|------------------------|-------------|
+| JazzCash | JazzCash App → Money Transfer → Bank Transfer → Finish Payment |
+| Easypaisa | Easypaisa App → Send Money → Bank Transfer → Finish Payment |
+
+The customer sends exactly the order amount to the bank account from the wallet they entered. The member finds the incoming transfer by that wallet account number and confirms the order. As on every method, the number is the customer's claim to check, not proof of payment.
+
+If no bank account can be assigned within the 10 seconds, the order fails exactly as on the other methods: `CancelledTimeout`, **"Failed to assign the order to a member. Please check with support."** and an `order.failed` webhook.
+
 ### Changing the payment method
 
-The page opens directly on the `walletType` you requested and shows no method list. Only a link that names no method starts on the list of methods that are enabled for your account and whose [amount limit](/guides/payment-methods#amount-limits) covers the order; a customer who picked one there can go back with **Pay another way** until they submit their account. The account they are asked for follows the method: a JazzCash account for a JazzCash method, an Easypaisa account for an Easypaisa method. Once an account number, Till ID or QR code has been shown, the order stays on that method and that account.
+The page opens directly on the `walletType` you requested and shows no method list. Only a link that names no method starts on the list of methods that are enabled for your account and whose [amount limit](/guides/payment-methods#amount-limits) covers the order: up to seven, the six wallet methods first and Bank Account last. A customer who picked one there can go back with **Pay another way** until they submit their account. The account they are asked for follows the method: a JazzCash account for a JazzCash method, an Easypaisa account for an Easypaisa method, and the wallet they choose for Bank Account. Once an account number, Till ID, QR code or bank account has been shown, the order stays on that method and that account.
 
 ## Withdrawals
 

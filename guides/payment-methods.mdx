@@ -1,11 +1,11 @@
 ---
 title: "Payment Methods"
-description: "The six deposit payment methods, the walletType for each, the amount limits per method, how C2C matches a receiving account, and what your customer enters on the payment page."
+description: "The seven deposit payment methods, the walletType for each, the amount limits per method, how C2C matches a receiving account, and what your customer enters on the payment page."
 ---
 
 ## Overview
 
-The `walletType` of an order names one **payment method**: a provider (JazzCash or Easypaisa) and what the customer pays to (an account number, a Till ID or a QR code). A deposit is only ever given a receiving account of exactly the method you requested.
+The `walletType` of an order names one **payment method**: a provider (JazzCash or Easypaisa) and what the customer pays to (an account number, a Till ID or a QR code), or a bank account, which the customer pays by bank transfer from their JazzCash or Easypaisa wallet. A deposit is only ever given a receiving account of exactly the method you requested.
 
 ## Deposit methods
 
@@ -17,14 +17,15 @@ The `walletType` of an order names one **payment method**: a provider (JazzCash 
 | `Easypaisa` | Easypaisa account number | An Easypaisa account number | Their own Easypaisa account number (`03XXXXXXXXX`) |
 | `EasypaisaTillID` | Easypaisa Till ID | An Easypaisa Till ID | Their own Easypaisa account number |
 | `EasypaisaQR` | Easypaisa QR | The member's Easypaisa QR code, which they scan | Their own Easypaisa account number |
+| `BankAccount` | Bank Account | The member's bank account, by bank transfer from their JazzCash or Easypaisa wallet | The wallet they pay from (JazzCash or Easypaisa) and that wallet's account number |
 
 No method asks for a transaction ID (TID) or IBAN digits any more. See [What the customer submits](#what-the-customer-submits).
 
 `JazzCashTillID`, `JazzCashQR` and `EasypaisaQR` are new values. `EasypaisaTillID` is the **Easypaisa** Till ID method.
 
-<Note>
-  `BankAccount` is still a valid `walletType`: it is used for [withdrawals](#withdrawals), and a deposit can be created with it. Bank accounts aren't offered on the hosted payment page for now, though. The payment link of a `BankAccount` deposit opens on the list of available methods, and the customer pays with one of the six methods above.
-</Note>
+<Warning>
+  **Changed behaviour.** `BankAccount` is now a deposit method of its own on the hosted payment page. Bank accounts used not to be offered there: the payment link of a `BankAccount` deposit opened on the list of available methods, and the customer paid with one of the six wallet methods. The link now opens directly on the Bank Account checkout, and the customer is given a member's bank account to pay by bank transfer from their JazzCash or Easypaisa wallet. See [Bank account](/guides/hosted-payment-page#bank-account).
+</Warning>
 
 ## Exact matching
 
@@ -42,6 +43,7 @@ A deposit requested on a `walletType` is assigned only to a member who has a rec
 | `JazzCashTillID` | Not available | A JazzCash Till ID only |
 | `JazzCashQR` | Not available | A JazzCash QR code only |
 | `EasypaisaQR` | Not available | An Easypaisa QR code only |
+| `BankAccount` | Accepted, but paid with one of the six wallet methods | A bank account only |
 
 ### If you already integrate
 
@@ -51,6 +53,7 @@ A deposit requested on a `walletType` is assigned only to a member who has a rec
 - If you relied on `Easypaisa` reaching Easypaisa Till IDs, request `EasypaisaTillID` for those payments.
 - To let customers pay by QR code, request `JazzCashQR` or `EasypaisaQR`.
 - If your code validates `walletType` against a fixed list, add `JazzCashTillID`, `JazzCashQR` and `EasypaisaQR`.
+- A `BankAccount` deposit is now paid into a bank account, on the Bank Account checkout. If your customers should pay with a wallet method, request that method.
 
 ### When no account of the method is available
 
@@ -58,18 +61,19 @@ Creating the order never depends on a member being available: a deposit is alway
 
 ### When the customer changes the method
 
-The payment page opens directly on the `walletType` you requested, with no method list. A customer only chooses a method themselves when they reach the page through a link that names none: the page then lists the methods that are enabled for your account and whose [amount limit](#amount-limits) covers the order (so it can show fewer than six), and until they submit their account they can go back with **Pay another way**. An order paid on another method than the one you requested asks for the account of that method's provider, and your fee is re-quoted for it. Once an account number, Till ID or QR code has been shown, the order stays on that method.
+The payment page opens directly on the `walletType` you requested, with no method list. A customer only chooses a method themselves when they reach the page through a link that names none: the page then lists the methods that are enabled for your account and whose [amount limit](#amount-limits) covers the order (so it can show fewer than seven), the six wallet methods first and Bank Account last, and until they submit their account they can go back with **Pay another way**. An order paid on another method than the one you requested asks for the wallet account that method is paid from, and your fee is re-quoted for it. Once an account number, Till ID, QR code or bank account has been shown, the order stays on that method.
 
 ## What the customer submits
 
-On all six methods the customer submits one thing on the [hosted payment page](/guides/hosted-payment-page), **before** they are shown where to pay: the **wallet account number they will pay from**.
+On all seven methods the customer submits one thing on the [hosted payment page](/guides/hosted-payment-page), **before** they are shown where to pay: the **wallet account number they will pay from**. On `BankAccount` they also choose which wallet that is, because a bank account can be paid from either.
 
 | Methods | The customer enters |
 |---------|---------------------|
 | `JazzCash`, `JazzCashTillID`, `JazzCashQR` | Their JazzCash account number: 11 digits starting with `03`, for example `03001234567` |
 | `Easypaisa`, `EasypaisaTillID`, `EasypaisaQR` | Their Easypaisa account number: 11 digits starting with `03`, for example `03001234567` |
+| `BankAccount` | The wallet they pay from, JazzCash or Easypaisa, and that wallet's account number: 11 digits starting with `03`, for example `03001234567` |
 
-Only after they submit it does C2C assign a member and show that member's account number, Till ID or QR code. The customer then pays the exact amount in their wallet app. **Nothing is submitted after paying**: the assigned member confirms the order when the payment arrives from the account the customer gave.
+Only after they submit it does C2C assign a member and show that member's account number, Till ID, QR code or bank account. The customer then pays the exact amount in their wallet app. **Nothing is submitted after paying**: the assigned member confirms the order when the payment arrives from the account the customer gave.
 
 <Warning>
   **Changed behaviour.** The account number and Till ID methods used to ask for the last digits of the transaction ID (TID) after paying, `EasypaisaQR` asked for the last 4 digits of the customer's IBAN, and the QR methods had an **I've Completed Payment** button. None of these exist any more. `txnRefDigitsRequired` is still accepted on [Create deposit](/api-reference/endpoints/create-deposit), but it is deprecated and no longer used.
@@ -93,8 +97,9 @@ Every order must be for an amount within the limit of its payment method. A limi
 | `JazzCash` | 1,000 | 50,000 |
 | `JazzCashTillID` | 300 | 50,000 |
 | `JazzCashQR` | 300 | 50,000 |
+| `BankAccount` | 300 | 50,000 |
 
-A `BankAccount` deposit is paid with one of the six methods above, because bank accounts aren't offered on the payment page for now. Its amount must therefore be one that at least one of them accepts: 300 to 50,000 PKR.
+A `BankAccount` deposit has a limit of its own, like every other method. An amount outside it is refused with the same `422` and the code `order.amountOutOfRange`, for example `BankAccount deposits must be between 300 and 50,000 PKR. The requested amount is 299 PKR.`
 
 ### Withdrawals (payout)
 
@@ -119,7 +124,7 @@ Creating the order is refused with `422` and the code `order.amountOutOfRange`. 
 ```
 
 - Check the amount against the tables above before you create an order, and branch on `code` when the API refuses one. The `error` text states the limit in force and the amount you sent.
-- A deposit below 1,000 PKR can still be collected on a Till ID or QR method, whose minimum is 300 PKR.
+- A deposit below 1,000 PKR can still be collected on a Till ID, QR or Bank Account method, whose minimum is 300 PKR.
 - The message of a withdrawal names the provider, for example `Easypaisa withdrawals must be between 500 and 50,000 PKR. The requested amount is 499 PKR.`
 - C2C can change these limits. An order that was already accepted isn't affected: it keeps its payment method, and a retry with its `Idempotency-Key` returns the original order.
 
@@ -150,6 +155,7 @@ Your fee rules are configured by C2C per order type and method. A new method tha
 - A rule for `JazzCash` also prices `JazzCashTillID` and `JazzCashQR` deposits.
 - A rule for `Easypaisa` also prices `EasypaisaQR` deposits.
 - `EasypaisaTillID` keeps its own rules. It isn't priced by the `Easypaisa` rule.
+- `BankAccount` keeps its own rules too. It isn't priced by the rule of the wallet the customer pays from.
 
 Among your account's rules, one for the exact method takes precedence over the provider's rule. The fee is fixed when the order is accepted and re-quoted only if the customer pays with a different method than you requested.
 

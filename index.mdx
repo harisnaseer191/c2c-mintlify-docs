@@ -49,7 +49,7 @@ flowchart LR
     Pay customers out to their own wallet
   </Card>
   <Card title="Payment methods" icon="credit-card" href="/guides/payment-methods">
-    The six deposit methods and the `walletType` for each
+    The seven deposit methods and the `walletType` for each
   </Card>
   <Card title="Hosted payment page" icon="window-maximize" href="/guides/hosted-payment-page">
     What your customer sees during a deposit
@@ -67,8 +67,8 @@ flowchart LR
 | **Authentication** | `C2C-API-Key: mk_live_...` header (`Authorization: Bearer` also accepted) |
 | **Request signing** | MD5 `signature` field in the body. Always enforced for deposits and withdrawals. |
 | **Idempotency** | `Idempotency-Key` header required on order creation |
-| **Payment methods** | JazzCash and Easypaisa, each by account number, Till ID or QR code, for deposits; JazzCash, Easypaisa, Easypaisa Till ID and bank account for withdrawals (enabled per merchant). See [Payment methods](/guides/payment-methods). |
-| **Amount limits** | Per order and payment method: deposits 1,000 to 50,000 PKR by account number and 300 to 50,000 PKR by Till ID or QR code; withdrawals 500 to 50,000 PKR to Easypaisa or JazzCash. See [Amount limits](/guides/payment-methods#amount-limits). |
+| **Payment methods** | JazzCash and Easypaisa, each by account number, Till ID or QR code, and bank account (paid by bank transfer from a JazzCash or Easypaisa wallet) for deposits; JazzCash, Easypaisa, Easypaisa Till ID and bank account for withdrawals (enabled per merchant). See [Payment methods](/guides/payment-methods). |
+| **Amount limits** | Per order and payment method: deposits 1,000 to 50,000 PKR by wallet account number and 300 to 50,000 PKR by Till ID, QR code or bank account; withdrawals 500 to 50,000 PKR to Easypaisa or JazzCash. See [Amount limits](/guides/payment-methods#amount-limits). |
 | **Currencies** | PKR (default), INR, BDT |
 | **Notifications** | Webhooks `order.completed` / `order.failed` + status polling |
 | **Rate limits** | None on the Merchant API |

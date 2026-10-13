@@ -8,7 +8,7 @@ description: "Create a deposit order and get a hosted payment page URL where you
 
 Creates a **deposit**: your customer pays money into an account held by a C2C member, and the amount, minus fees, is credited to your merchant wallet once the member confirms receipt.
 
-C2C creates the order and returns a `paymentPageUrl`. Redirect your customer to that hosted page. It opens on the [payment method](/guides/payment-methods) you requested in `walletType`: the customer enters the wallet account they will pay from, C2C assigns a member, and the page shows the account number, Till ID or QR code to pay. The customer sends the money from their wallet app, and the member confirms the order when the payment arrives. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
+C2C creates the order and returns a `paymentPageUrl`. Redirect your customer to that hosted page. It opens on the [payment method](/guides/payment-methods) you requested in `walletType`: the customer enters the wallet account they will pay from, C2C assigns a member, and the page shows the account number, Till ID, QR code or bank account to pay. The customer sends the money from their wallet app, and the member confirms the order when the payment arrives. See the [Deposit flow](/guides/deposit-flow) for the full lifecycle.
 
 The order is **always accepted** with status `Queued` and stage `Awaiting`. **No member is assigned when the order is created**: a member is assigned only when the customer submits the account they pay from on the payment page, so a customer who opens the link and leaves never occupies a member.
 
@@ -49,7 +49,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
 <ParamField body="amount" type="number" required>
   Amount the customer pays, in `currency`. Must be greater than `0`, have at most 4 decimal places and be less than `100,000,000,000,000`.
 
-  It must also be within the [amount limit](/guides/payment-methods#amount-limits) of the `walletType`, both ends included: `1000` to `50000` for `JazzCash` and `Easypaisa`, `300` to `50000` for `JazzCashTillID`, `JazzCashQR`, `EasypaisaTillID` and `EasypaisaQR` (and for `BankAccount`, which is paid with one of those methods). An amount outside the limit is refused with `422` and the code `order.amountOutOfRange`.
+  It must also be within the [amount limit](/guides/payment-methods#amount-limits) of the `walletType`, both ends included: `1000` to `50000` for `JazzCash` and `Easypaisa`, `300` to `50000` for `JazzCashTillID`, `JazzCashQR`, `EasypaisaTillID`, `EasypaisaQR` and `BankAccount`. An amount outside the limit is refused with `422` and the code `order.amountOutOfRange`.
 
   **Example:** `1500`
 </ParamField>
@@ -67,7 +67,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
   | `Easypaisa` | An Easypaisa account number |
   | `EasypaisaTillID` | An Easypaisa Till ID |
   | `EasypaisaQR` | An Easypaisa QR code |
-  | `BankAccount` | Accepted, but bank accounts aren't offered on the payment page for now: the page opens on the list of available methods and the customer picks one of the six above. |
+  | `BankAccount` | A bank account, by bank transfer from their JazzCash or Easypaisa wallet |
 
   No method falls back to another. `JazzCash` and `Easypaisa` mean the account number only: request `JazzCashTillID` or `EasypaisaTillID` for a Till ID. The order is accepted whether or not an account of the requested method is available right now: a member is looked for when the customer submits the account they pay from. On the payment page the customer can still switch to another method that is enabled for you and whose amount limit covers the order, before they submit their account.
 </ParamField>
@@ -297,8 +297,8 @@ See [Errors](/api-reference/errors) for the complete error model.
 ## What happens next
 
 1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
-2. The customer enters the wallet account number they will pay from: 11 digits starting with `03`. Only then does C2C assign a member.
-3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID or QR code to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 10-second countdown. If nobody becomes available within those 10 seconds, the order fails with `CancelledTimeout` and the `reason` `Failed to assign the order to a member. Please check with support.`
+2. The customer enters the wallet account number they will pay from: 11 digits starting with `03`. On `BankAccount` they first choose whether that wallet is JazzCash or Easypaisa. Only then does C2C assign a member.
+3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID, QR code or bank account to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 10-second countdown. If nobody becomes available within those 10 seconds, the order fails with `CancelledTimeout` and the `reason` `Failed to assign the order to a member. Please check with support.`
 4. The customer pays the exact amount in their wallet app. They submit nothing afterwards: no transaction ID and no payment confirmation.
 5. The member confirms the order when the payment arrives from the account the customer gave (`Completed`), or rejects it if the payment did not arrive (`Rejected`). If the payment isn't confirmed before the link expires, the order becomes `Expired`.
 6. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
@@ -329,7 +329,7 @@ To let the customer try again after a `CancelledTimeout`, create a new order wit
     Track the order to completion
   </Card>
   <Card title="Payment methods" icon="credit-card" href="/guides/payment-methods">
-    The six methods and how they are matched
+    The seven methods and how they are matched
   </Card>
   <Card title="Hosted payment page" icon="window-maximize" href="/guides/hosted-payment-page">
     What your customer sees

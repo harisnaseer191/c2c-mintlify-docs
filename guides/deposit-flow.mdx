@@ -7,7 +7,7 @@ description: "How a C2C deposit moves from your API call to money in your mercha
 
 A deposit collects money from your customer. On the hosted payment page the customer first gives the wallet account they will pay from. C2C then assigns a verified **member**, the customer pays that member from their own mobile wallet, the member confirms receipt, and C2C credits your merchant wallet with the amount minus fees.
 
-The `walletType` you request is the [payment method](/guides/payment-methods): JazzCash or Easypaisa, by account number, Till ID or QR code. The customer is only ever given a receiving account of exactly that method.
+The `walletType` you request is the [payment method](/guides/payment-methods): JazzCash or Easypaisa, by account number, Till ID or QR code, or a bank account, paid by bank transfer from a JazzCash or Easypaisa wallet. The customer is only ever given a receiving account of exactly that method.
 
 <Warning>
   **Changed behaviour.** No member is assigned when the order is created any more. Every new deposit is answered with status `Queued` and stage `Awaiting`, and a member is assigned only when the customer submits the account they pay from. The customer no longer enters a transaction ID or IBAN digits and no longer confirms the payment on the page: the member confirms it when the money arrives, so new deposits go from `AwaitingCustomerPayment` straight to `Completed`.
@@ -32,7 +32,7 @@ sequenceDiagram
     Customer->>Page: Open page, submit the wallet account they pay from
     Page->>C2C: Assign a member for the payment method (looks for up to 10 seconds)
     C2C->>Member: Assign order, with the customer's account (AwaitingCustomerPayment)
-    Page-->>Customer: Account number, Till ID or QR code to pay
+    Page-->>Customer: Account number, Till ID, QR code or bank account to pay
     Customer->>Member: Send money from wallet app
     Member->>C2C: Confirm receipt
     C2C->>C2C: Completed, credit merchant wallet (amount − fee)
@@ -66,9 +66,9 @@ Send the customer to `paymentPageUrl` right away. The link is valid for **15 min
 
 ### 3. Customer gives the account they pay from, and a member is assigned
 
-The page opens on the method you requested. The customer enters the wallet account number they will pay **from**: their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method (11 digits starting with `03`, for example `03001234567`).
+The page opens on the method you requested. The customer enters the wallet account number they will pay **from**: their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method (11 digits starting with `03`, for example `03001234567`). On `BankAccount` they first choose which of the two wallets they pay from.
 
-Once they submit it, C2C looks for an **eligible member**: online, with an approved receiving account of exactly the requested method, a limit covering the amount, and enough balance to back the deposit. No method falls back to another: `JazzCash` is never given a JazzCash Till ID or QR code, and never an Easypaisa account. See [Exact matching](/guides/payment-methods#exact-matching).
+Once they submit it, C2C looks for an **eligible member**: online, with an approved receiving account of exactly the requested method, a limit covering the amount, and enough balance to back the deposit. No method falls back to another: `JazzCash` is never given a JazzCash Till ID or QR code, and never an Easypaisa account, and `BankAccount` is only ever given a bank account. See [Exact matching](/guides/payment-methods#exact-matching).
 
 - **Member free:** the member is assigned within a moment and notified in their app. The order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows where to pay.
 - **No member free:** the order moves to `Awaiting` and the page shows **Assigning Collection Account** with a 10-second countdown while C2C keeps looking. If a member becomes available in that time, the order continues as above.
@@ -86,6 +86,7 @@ The customer sends exactly the order amount from the account they gave, using th
 | `Easypaisa` | Their Easypaisa account number | The account number to pay, with a copy button |
 | `EasypaisaTillID` | Their Easypaisa account number | The Till ID to pay, with a copy button |
 | `EasypaisaQR` | Their Easypaisa account number | The QR code to scan or save |
+| `BankAccount` | The wallet they pay from (JazzCash or Easypaisa) and its account number | The bank name, account title and account number to pay, each with a copy button |
 
 No transaction ID and no IBAN digits are asked for. After paying, the customer can tap **I have sent the payment**: the order then moves to `AwaitingMemberConfirmation` and the member is asked to check for the payment. Without it the order stays `AwaitingCustomerPayment` until the member acts. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
 

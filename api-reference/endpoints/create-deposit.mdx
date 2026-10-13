@@ -145,7 +145,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
       C2C's human-readable reference, for example `ORD-20261008120620-3f6b`. Quote it to support.
     </ResponseField>
     <ResponseField name="expiresAt" type="string">
-      ISO 8601 UTC time when the payment page link expires, **15 minutes** after creation.
+      ISO 8601 UTC time when the payment page link expires, **30 minutes** after creation.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -296,7 +296,7 @@ See [Errors](/api-reference/errors) for the complete error model.
 
 ## What happens next
 
-1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 15 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
+1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 30 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
 2. The customer enters the wallet account number they will pay from: 11 digits starting with `03`. On `BankAccount` they first choose whether that wallet is JazzCash or Easypaisa. Only then does C2C assign a member.
 3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID, QR code or bank account to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 10-second countdown. If nobody becomes available within those 10 seconds, the order fails with `CancelledTimeout` and the `reason` `Failed to assign the order to a member. Please check with support.`
 4. The customer pays the exact amount in their wallet app. They submit nothing afterwards: no transaction ID and no payment confirmation.

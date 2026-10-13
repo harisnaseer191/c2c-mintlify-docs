@@ -10,7 +10,7 @@ Every [deposit order](/api-reference/endpoints/create-deposit) comes with a **ho
 No member is assigned when the order is created. A member, and the account the customer pays into, is assigned only after the customer has submitted the account they pay **from**. A customer who opens the link and leaves never occupies a member.
 
 <Warning>
-  **Changed behaviour.** The customer no longer enters a transaction ID (TID) or IBAN digits. They give the wallet account they pay from **before** the payment details are shown. After paying they can tap **I have sent the payment**, which asks the member to check for it now; the member can also confirm without it, as soon as the payment arrives from that account.
+  **Changed behaviour.** The customer no longer enters a transaction ID (TID) or IBAN digits. They give the wallet account they pay from **before** the payment details are shown. They report nothing after paying: the page no longer has an **I have sent the payment** button. In its place an **Open JazzCash Wallet** or **Open Easypaisa Wallet** button takes them to their wallet app, and the member confirms the order as soon as the payment arrives from that account.
 </Warning>
 
 <Info>
@@ -26,7 +26,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 | Property | Detail |
 |----------|--------|
 | Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
-| Lifetime | **15 minutes** from order creation (`expiresAt` in the response) |
+| Lifetime | **30 minutes** from order creation (`expiresAt` in the response) |
 | Wallet | `wallet` is the [payment method](/guides/payment-methods) (`walletType`) you requested: `jazzcash`, `jazzcashtillid`, `jazzcashqr`, `easypaisa`, `easypaisatillid`, `easypaisaqr` or `bank` (a `BankAccount` deposit). The page opens directly on that method. `wallet` isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
 | Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
@@ -63,17 +63,33 @@ The page has the same three steps for all seven [payment methods](/guides/paymen
 
     The member who received the money confirms the order when the payment arrives from the account the customer gave. The page then shows the confirmation by itself and, if you set `successUrl`, returns the customer to your site. If the customer reloads or reopens the link meanwhile, the page shows the same payment details again.
 
-    If the payment is neither confirmed nor reported before the link expires (15 minutes after the order was created), the order becomes `Expired`.
-  </Step>
-  <Step title="Report the payment (optional)">
-    Under the payment details the page has an **I have sent the payment** button. Tapping it moves the order to `AwaitingMemberConfirmation`, notifies the member, and the page shows **Awaiting confirmation** until the member decides.
-
-    It is the customer's claim and completes nothing: the order becomes `Completed` only when the member confirms that the money arrived. A reported order no longer expires with the link. If the member doesn't decide within their confirmation window, it moves to `ManualReview` and is resolved by C2C operations.
+    If the payment is not confirmed before the link expires (30 minutes after the order was created), the order becomes `Expired`.
   </Step>
 </Steps>
 
 <Note>
   The account the customer enters is their claim, not proof. The order completes only when the member confirms that the money arrived. If the customer pays with a different method than you requested, your fee is re-quoted for the method used.
+</Note>
+
+### Opening the wallet app
+
+With the payment details the page shows an **Open JazzCash Wallet** or **Open Easypaisa Wallet** button, named after the wallet the customer pays from.
+
+| The customer is on | The button opens |
+|--------------------|------------------|
+| A phone (Android or iPhone) | The JazzCash or Easypaisa app. If the app isn't installed, the provider's own page sends the customer to the app's store listing. |
+| A computer | The app's Google Play page. A computer has no wallet app to open. |
+
+It opens in a new tab, so the payment page stays open and shows the confirmation when the customer comes back.
+
+The button only opens the app. It can't pass the amount or the account to the wallet app, so the customer still copies them from the page. Tapping it tells C2C nothing: the order stays `AwaitingCustomerPayment` and no webhook is sent.
+
+<Note>
+  If you show the payment page inside your own app (a WebView), your app decides what happens to a link that opens a new window. Let it open in the device's browser, or the wallet app can't start.
+</Note>
+
+<Note>
+  The **I have sent the payment** button was removed. `AwaitingMemberConfirmation`, the status it set, is now reached only when C2C operations set it. An order that is already in that status, or in `ManualReview`, shows **Awaiting confirmation** on the page until it is decided.
 </Note>
 
 ### Account number and Till ID methods
@@ -87,8 +103,8 @@ The page shows:
 - The amount to pay.
 - A tip: pay the exact amount, and always use the latest account number or Till ID shown for this order.
 - The route through the wallet app (below).
+- The **Open JazzCash Wallet** or **Open Easypaisa Wallet** button (see [Opening the wallet app](#opening-the-wallet-app)).
 - **Within 1 minute, the money will be credited automatically.**
-- The **I have sent the payment** button.
 - A **How to Pay?** link (below).
 
 | Method | Route shown |
@@ -108,10 +124,9 @@ The page shows:
 
 - The member's **QR code** to scan.
 - **Save QR**, to save the code as an image.
-- An **Open JazzCash App** or **Open Easypaisa App** button, on phones only. It opens the wallet app's page in the phone's app store (Google Play or the App Store), where **Open** starts the installed app. A computer has no wallet app, so the button is not shown there.
+- The **Open JazzCash Wallet** or **Open Easypaisa Wallet** button, beside **Save QR** (see [Opening the wallet app](#opening-the-wallet-app)).
 - **How to pay?**, which opens a guidance picture.
 - **Within 1 minute, money will reach your balance.**
-- The **I have sent the payment** button.
 
 The customer scans the code in their JazzCash or Easypaisa app, or loads the saved image there, and pays exactly the order amount.
 
@@ -129,8 +144,8 @@ Once a bank account is assigned, the page shows:
 - The **Transfer amount**.
 - A tip: make sure the transfer amount matches exactly, and use the latest bank account shown for this order.
 - The route through each wallet app (below), starting with the wallet the customer pays from.
+- The **Open JazzCash Wallet** or **Open Easypaisa Wallet** button, for the wallet the customer pays from (see [Opening the wallet app](#opening-the-wallet-app)).
 - **Within 1 minute, the money will be credited automatically.**
-- The **I have sent the payment** button.
 
 | The customer pays from | Route shown |
 |------------------------|-------------|
@@ -156,7 +171,7 @@ For a [withdrawal](/api-reference/endpoints/create-withdrawal) the page works th
     - **Wallet Account Number** — checked against the order's `walletType` (JazzCash / Easypaisa: an 11-digit mobile account number such as `03001234567`; `+92…` is accepted and normalised)
     - **Account Holder Name**
 
-    The wallet provider is the order's `walletType` and the amount is the order's `amount`; the customer can change neither. They must submit before the link expires (15 minutes), otherwise the order ends `CancelledTimeout`.
+    The wallet provider is the order's `walletType` and the amount is the order's `amount`; the customer can change neither. They must submit before the link expires (30 minutes), otherwise the order ends `CancelledTimeout`.
   </Step>
   <Step title="Processing">
     After submitting — or immediately, when you sent the account yourself — the page shows that the withdrawal is being processed, with the wallet, the account (all but the last 4 digits hidden) and the account holder name. It updates by itself. Reloading the page returns here; the submitted account cannot be edited, and submitting the same details again has no effect.

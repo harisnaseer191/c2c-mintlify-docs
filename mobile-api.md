@@ -333,11 +333,12 @@ checkout page, **before** a member is assigned. A deposit therefore reaches the 
 | `payerIdentifierSubmittedAt` | When the customer submitted it |
 
 No transaction ID and no IBAN digits are asked for. The member **confirms** when a payment of the order's amount
-arrives from that account, or **rejects** if it does not. After paying, the customer may tap "I have sent the payment"
-on the checkout page: the order then becomes `AwaitingMemberConfirmation` and an `OrderSubmitted` event is sent — the
-same two actions apply, and the member need not wait for it. An order that is neither confirmed nor reported expires
-with the customer's checkout link, 15 minutes after the order was created (`Expired`); a reported order is escalated
-to `ManualReview` instead when the member does not decide within their confirmation window.
+arrives from that account, or **rejects** if it does not. The customer reports nothing after paying: the checkout
+page no longer has an "I have sent the payment" button, so the order stays `AwaitingCustomerPayment` until the member
+decides. An order that is not confirmed expires with the customer's checkout link, 30 minutes after the order was
+created (`Expired`). `AwaitingMemberConfirmation` and the `OrderSubmitted` event remain for an order whose payment was
+reported as sent (now only when an administrator sets that status): the same two actions apply, and such an order is
+escalated to `ManualReview` instead when the member does not decide within their confirmation window.
 
 `TransactionIdDigits` (the last digits of a transaction ID, in `customerSubmittedTxnRef`) and `PayerIbanLastFour` (the
 last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
@@ -643,7 +644,7 @@ with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's a
 member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
 Once an account has been shown the order never moves — the customer may already have paid — and the member can
 confirm or reject it even after going offline. The member confirms when the payment arrives from the customer's
-account; an order not confirmed before the checkout link expires (15 minutes after the order was created) becomes
+account; an order not confirmed before the checkout link expires (30 minutes after the order was created) becomes
 `Expired`.
 
 **Going offline.** Only online members with Collections enabled are assigned new orders. Online / Collections
@@ -683,7 +684,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | Event | Sent when | `payload` |
 |---|---|---|
 | `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you. A deposit arrives ready to act on: `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier` | full order payload (below) |
-| `OrderSubmitted` | The customer tapped "I have sent the payment" on the checkout page: the deposit is now `AwaitingMemberConfirmation`. Optional for the customer — a deposit can be confirmed from `OrderAssigned` on, without waiting for it | full order payload |
+| `OrderSubmitted` | The deposit's payment was reported as sent: it is now `AwaitingMemberConfirmation`. The checkout page no longer sends this report, so do not wait for the event — a deposit is confirmed from `OrderAssigned` on | full order payload |
 | `OrderExpired` | Your order expired or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
@@ -744,7 +745,7 @@ For a deposit, `paymentAccountWalletType` is the member's account type (one of t
 `customerSubmittedTxnRef` stays `null`. `payerWalletProvider` (`JazzCash` | `Easypaisa`) is the provider of that
 wallet, and `paymentAccountBankName` the bank of the member's account when it is a bank account (`null` for every
 wallet account). The order expires with the customer's checkout link (`paymentPageExpiresAt`,
-15 minutes after it was created) if it has not been confirmed by then. The app does not put the payer identifier in
+30 minutes after it was created) if it has not been confirmed by then. The app does not put the payer identifier in
 the toast for the event; it is read from the refetched order on Order Details.
 
 ### Get Pending Notifications & Open Orders
@@ -1471,11 +1472,11 @@ All list endpoints return the same paginated envelope:
 | `Awaiting`                   | Not assigned to a member yet (e.g. a withdrawal waiting for the customer's account details or for an eligible member, or a deposit whose checkout is looking for a member) |
 | `Queued`                     | Merchant deposit whose customer has not yet submitted the account they pay from: it has no member (orders created before this release: assigned to you, waiting for the customer to open checkout; legacy orders: waiting for capacity) |
 | `AwaitingCustomerPayment`    | Deposit assigned to you: the customer was shown your account. Confirm when the payment arrives from `payerIdentifier`, reject if it does not |
-| `AwaitingMemberConfirmation` | The customer tapped "I have sent the payment" on the checkout page: check that it arrived from `payerIdentifier`, then confirm or reject |
+| `AwaitingMemberConfirmation` | The payment was reported as sent (the checkout page no longer does this; an administrator can set it): check that it arrived from `payerIdentifier`, then confirm or reject |
 | `AwaitingMemberPayout`       | Withdrawal assigned to you — pay out to the customer account                |
 | `Completed`                  | Confirmed by you (terminal)                                                 |
 | `Rejected`                   | Rejected by you                                                             |
-| `Expired`                    | The deposit was not confirmed before the customer's checkout link expired (15 minutes after the order was created) |
+| `Expired`                    | The deposit was not confirmed before the customer's checkout link expired (30 minutes after the order was created) |
 | `ManualReview`               | With an admin: escalated (e.g. not confirmed in time) or reported as an abnormal payment. Do not pay it again |
 | `Assigned`                   | Legacy: assigned — awaiting confirmation                                    |
 | `Frozen`                     | Legacy: freeze time passed — still awaiting confirmation                    |

@@ -109,13 +109,13 @@ This guide takes you from credentials to a completed deposit. Examples use Node.
   </Step>
 
   <Step title="Redirect the customer">
-    Send the customer to `paymentPageUrl` within **15 minutes**. The page opens on the `walletType` you requested and works the same for every [payment method](/guides/payment-methods):
+    Send the customer to `paymentPageUrl` within **30 minutes**. The page opens on the `walletType` you requested and works the same for every [payment method](/guides/payment-methods):
 
     1. The customer enters the wallet account number they will pay from. With `JazzCash`, as here, that is their JazzCash account, for example `03001234567`.
     2. C2C assigns a member. If none is free, the page looks for one for 10 seconds; if nobody becomes available the order fails with `CancelledTimeout`.
     3. The page shows where to pay: with `JazzCash`, the account number to send the money to. The customer pays the exact amount in their wallet app.
 
-    No transaction ID is asked for. The customer can tap **I have sent the payment** to have it checked right away; the member confirms the order when the payment arrives, and the page returns the customer to your `successUrl`. See [Hosted payment page](/guides/hosted-payment-page).
+    No transaction ID is asked for, and the customer reports nothing after paying. An **Open JazzCash Wallet** button takes them to their wallet app; the member confirms the order when the payment arrives, and the page returns the customer to your `successUrl`. See [Hosted payment page](/guides/hosted-payment-page).
   </Step>
 
   <Step title="Get the outcome">

@@ -54,7 +54,7 @@ Call [Create Withdrawal Order](/api-reference/endpoints/create-withdrawal) with:
 
 C2C runs the same checks as for deposits: API key, signature, validation, active account, IP whitelist, payment method enabled, amount within the limit, and a `merchantOrderRef` that isn't already used by a payout in progress or completed (`409`). It also runs the **funding check**: your available balance must cover this payout and every payout in progress, including fees. The fee is fixed when the order is accepted; later fee-rule changes apply to new orders only.
 
-If you didn't send `customerAccountNumber`, the order is accepted as `Awaiting` and waits for the customer: redirect them to `paymentPageUrl` (valid for 15 minutes). The steps below continue once they have submitted their account. If they don't, the order ends `CancelledTimeout`.
+If you didn't send `customerAccountNumber`, the order is accepted as `Awaiting` and waits for the customer: redirect them to `paymentPageUrl` (valid for 30 minutes). The steps below continue once they have submitted their account. If they don't, the order ends `CancelledTimeout`.
 
 C2C then looks for an available member who has an approved account with the customer's provider (JazzCash for a JazzCash wallet, Easypaisa for an Easypaisa wallet) and whose limit covers the amount:
 
@@ -76,7 +76,7 @@ If the member cannot complete the payout normally — the account details are wr
 | Payout window (60 min by default) passes, retries left | stays `AwaitingMemberPayout`, reassigned to another member | none | unchanged |
 | Payout window passes, `maxRetryCount` reached | `ManualReview` | none until resolved | unchanged until resolved |
 | Member reports an abnormal payment | `ManualReview` | none until resolved | unchanged until resolved |
-| Customer doesn't enter their account within 15 minutes (order created without `customerAccountNumber`) | `CancelledTimeout` | `order.failed` (`reason`: `The customer did not provide their withdrawal account in time`) | unchanged, reservation released |
+| Customer doesn't enter their account within 30 minutes (order created without `customerAccountNumber`) | `CancelledTimeout` | `order.failed` (`reason`: `The customer did not provide their withdrawal account in time`) | unchanged, reservation released |
 | C2C resolves a review | `Completed` / `Cancelled` | `order.completed` / `order.failed` | per outcome |
 | No member available within 120 minutes (`Awaiting` order) | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) | unchanged, reservation released |
 
@@ -87,7 +87,7 @@ stateDiagram-v2
     [*] --> AwaitingMemberPayout: order created, member assigned
     [*] --> Awaiting: order created, no eligible member yet
     Awaiting --> AwaitingMemberPayout: member becomes available (after the customer's account is known)
-    Awaiting --> CancelledTimeout: no member within 120 min, or no account from the customer within 15 min
+    Awaiting --> CancelledTimeout: no member within 120 min, or no account from the customer within 30 min
     AwaitingMemberPayout --> AwaitingMemberPayout: window passed, reassigned (up to maxRetryCount)
     AwaitingMemberPayout --> Completed: member confirms payout
     AwaitingMemberPayout --> Rejected: member rejects

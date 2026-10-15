@@ -197,16 +197,36 @@ GET /api/member/orders
 
 | Parameter  | Type     | Default | Description                              |
 |------------|----------|---------|------------------------------------------|
-| `page`     | int      | 1       | Page number                              |
-| `pageSize` | int      | 20      | Items per page                           |
-| `statuses` | string[] | —       | Filter by status (repeatable query param) |
+| `page`     | int      | 1       | Page number (ignored when `cursor` is given) |
+| `pageSize` | int      | 20      | Items per page (1–100)                   |
+| `cursor`   | string   | —       | The previous page's `nextCursor`: returns the orders after it. Opaque — pass it back unchanged |
+| `search`   | string   | —       | Part of an identifier the member sees on an order, any case (max 100 characters) — see below |
+| `statuses` | string[] | —       | Filter by status (repeatable query param). Only [`OrderStatus`](#orderstatus) values; any other value is refused with `400` |
 | `orderType`| string   | —       | `Deposit` or `Withdrawal`                |
 | `fromDate` | datetime | —       | Filter from date (ISO 8601)              |
 | `toDate`   | datetime | —       | Filter to date (ISO 8601)                |
 
+The list is the member's **whole** order history — every type and status — newest first (`createdAt` descending,
+ties broken by `id`, so the order never changes between requests). Search, filters and paging all run on the server
+over that whole history, never only over a page the app has loaded.
+
+**Paging.** For a list that loads more as the member scrolls, ask for the first page without `cursor`, then pass each
+response's `nextCursor` as `cursor` to get the next one, until `nextCursor` is `null`. A cursor page starts strictly
+after the last order the member already has, so orders created in the meantime never repeat an order or skip one
+(with `page` numbers, a new order pushes the last order of page 1 onto page 2). Keep the same filters and `search` while
+following a cursor; when they change, start again without one. To show new orders, fetch the first page again.
+`page` still works for a numbered list. An invalid `cursor` is refused with `400`.
+
+**Search** matches part of any of these, ignoring case: `orderReference`, `txnRefNo`, `memberTxnRefNo`,
+`customerSubmittedTxnRef`, `payerIdentifier` (the customer's account of a deposit) and `customerAccountNumber` (the
+customer's account of a withdrawal). It never matches the merchant's own reference or customer id, and never another
+member's orders.
+
 **Example**
 ```
 GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
+GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20
+GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20&cursor=NjM5MjU1NzM...
 ```
 
 **Response 200**
@@ -266,10 +286,14 @@ GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
     "pageSize": 20,
     "totalPages": 3,
     "hasNextPage": true,
-    "hasPreviousPage": false
+    "hasPreviousPage": false,
+    "nextCursor": "NjM5MjU1NzM5MjAwMDAwMDAwLjNmYTg1ZjY0NTcxNzQ1NjJiM2ZjMmM5NjNmNjZhZmE2"
   }
 }
 ```
+
+`totalCount` is the number of orders matching the filters and `search` in the whole history. `nextCursor` is `null` on
+the last page; follow it rather than `hasNextPage` when paging by cursor.
 
 ---
 

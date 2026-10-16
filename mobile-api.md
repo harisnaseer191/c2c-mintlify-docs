@@ -319,6 +319,7 @@ member's own account.
 | `commissionAmount` | The member's reward; `null` until it is known |
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
+| `rejectAvailableAt` | When the member may first reject the order: a **deposit** can only be rejected once the admin's *deposit reject threshold* (default 10 minutes) has passed since `assignedAt`. Absent when rejecting is not delayed (withdrawals, a threshold of 0) or `Reject` is not in `allowedActions`. Informational only: the app never compares it with the phone's clock, which may be set wrong. Tapping Reject always opens the reason sheet and the API decides — a rejection that is too early is refused with 422 `order.rejectNotYetAllowed` and the time left, which the app shows before closing the sheet. Confirming is never delayed |
 | `proofKind` | **Deposit**: what the customer of this order gave so the member can find the payment — [`OrderProofKind`](#orderproofkind). `PayerWalletNumber` on every new deposit, whatever the payment method; `TransactionIdDigits` and `PayerIbanLastFour` only appear on orders created before this release. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
 | `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method, and on a Bank Account deposit the JazzCash or Easypaisa wallet they send the bank transfer from (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
 | `payerIdentifierKind` | `PayerWalletNumber` \| `null` — what `payerIdentifier` is (`PayerIbanLastFour` only on orders created before this release) |
@@ -514,9 +515,16 @@ settled, so nothing is reversed.
 
 `reason` — **required**, at most 500 characters.
 
+A **deposit** can only be rejected once the platform's *deposit reject threshold* has passed since the order was
+assigned to the member (`assignedAt`). Administrators set it for every member (Admin portal → Settings → Order Rules;
+default 10 minutes, 0 turns it off). The order's `rejectAvailableAt` says when that is. Withdrawals are not delayed.
+Only this endpoint enforces the threshold, against the server's clock: a client must not block Reject by comparing
+`rejectAvailableAt` with the device's clock, which may be wrong by hours.
+
 **Response 200** — Rejected order  
 **Response 400** — `reason` is missing  
 **Response 409** — `Reject` is not in the order's `allowedActions` (the message says why, e.g. "This order is already completed.")  
+**Response 422** — `code: "order.rejectNotYetAllowed"`: too early to reject this deposit. The message gives the time left in whole minutes, rounded up — "You can reject this order in 7 minutes." (or "…in less than a minute.")  
 **Response 403** — Order belongs to a different member  
 **Response 404** — Order not found
 

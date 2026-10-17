@@ -48,7 +48,7 @@ Example `reason` values on `order.failed`: `Checkout expired before payment`, `F
 </Note>
 
 <Warning>
-  An order that failed can later be **confirmed by C2C operations**, for example after a dispute is resolved. You then receive `order.completed` after the earlier `order.failed`. Always act on the **latest** event, and confirm with a [status query](/api-reference/endpoints/query-order-status).
+  An order that failed can later be **completed**: by C2C operations, for example after a dispute is resolved, or by its member, when the customer's payment for a deposit they rejected arrives late (within 72 hours of the rejection by default). You then receive `order.completed` after the earlier `order.failed`, for the same `orderId` and `merchantOrderRef`. Always act on the **latest** event, and confirm with a [status query](/api-reference/endpoints/query-order-status).
 </Warning>
 
 ## Request format
@@ -314,7 +314,7 @@ async function processEventOnce(event) {
 ```
 
 - Deduplicate on `orderId` + `eventType`. Don't deduplicate on `X-C2C-Delivery-Id` or the body `timestamp` alone: a resend changes both.
-- Ignore duplicate events for orders you have already finalized, but still act on an `order.completed` that follows an earlier `order.failed` (an order resolved by C2C operations).
+- Ignore duplicate events for orders you have already finalized, but still act on an `order.completed` that follows an earlier `order.failed` (an order resolved by C2C operations, or a rejected deposit whose payment arrived late).
 - Before fulfilling, re-check the status with [Query order status](/api-reference/endpoints/query-order-status). This also protects you if your signing secret is ever exposed.
 
 ## Reconciliation

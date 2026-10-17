@@ -320,6 +320,7 @@ member's own account.
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
 | `rejectAvailableAt` | When the member may first reject the order: a **deposit** can only be rejected once the admin's *deposit reject threshold* (default 10 minutes) has passed since `assignedAt`. Absent when rejecting is not delayed (withdrawals, a threshold of 0) or `Reject` is not in `allowedActions`. Informational only: the app never compares it with the phone's clock, which may be set wrong. Tapping Reject always opens the reason sheet and the API decides — a rejection that is too early is refused with 422 `order.rejectNotYetAllowed` and the time left, which the app shows before closing the sheet. Confirming is never delayed |
+| `completeRejectedUntil` | **Rejected deposit the member rejected themselves**: until when they may still complete it, because the customer's payment arrived late — see [Complete Rejected Deposit](#complete-rejected-deposit). Absent for every other order: withdrawals, a deposit an administrator rejected, one rejected longer ago than the admin's completion window (default 72 hours), or when administrators turned the feature off. Show the **Mark as payment received** action only while it is present and in the future; the API decides either way |
 | `proofKind` | **Deposit**: what the customer of this order gave so the member can find the payment — [`OrderProofKind`](#orderproofkind). `PayerWalletNumber` on every new deposit, whatever the payment method; `TransactionIdDigits` and `PayerIbanLastFour` only appear on orders created before this release. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
 | `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method, and on a Bank Account deposit the JazzCash or Easypaisa wallet they send the bank transfer from (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
 | `payerIdentifierKind` | `PayerWalletNumber` \| `null` — what `payerIdentifier` is (`PayerIbanLastFour` only on orders created before this release) |
@@ -341,6 +342,8 @@ member's own account.
 | Withdrawal | `AwaitingMemberPayout` | `Confirm`, `Reject`, `ReportAbnormalPayment` |
 | Either | `Assigned` / `Frozen` (legacy) | the above plus `Cancel` |
 | Either | anything else (completed, closed, under admin review) | `[]` |
+
+A `Rejected` deposit has `allowedActions: []`; whether its member can still complete it is `completeRejectedUntil`, not `allowedActions`.
 
 #### What the customer submits (`proofKind`)
 
@@ -505,6 +508,8 @@ POST /api/member/orders/{id}/reject
 
 The member declines the order: the deposit did not arrive, or they will not pay the withdrawal out. Nothing was
 settled, so nothing is reversed.
+If the customer's payment reaches the member after they rejected a **deposit**, they can still complete it for a while: see
+[Complete Rejected Deposit](#complete-rejected-deposit).
 
 **Request**
 ```json
@@ -526,6 +531,49 @@ Only this endpoint enforces the threshold, against the server's clock: a client 
 **Response 409** — `Reject` is not in the order's `allowedActions` (the message says why, e.g. "This order is already completed.")  
 **Response 422** — `code: "order.rejectNotYetAllowed"`: too early to reject this deposit. The message gives the time left in whole minutes, rounded up — "You can reject this order in 7 minutes." (or "…in less than a minute.")  
 **Response 403** — Order belongs to a different member  
+**Response 404** — Order not found
+
+---
+
+### Complete Rejected Deposit
+
+```
+POST /api/member/orders/{id}/complete-rejected
+```
+
+**Auth**: Bearer JWT required.
+
+The member rejected a **deposit** because the customer's payment had not arrived, and it has arrived since. Completing
+it settles the order exactly like a confirmation (the member's balance is debited the amount less their commission, the
+merchant is credited the amount less its fee, on the terms fixed for the order) and sends the merchant
+`order.completed`. The rejection stays in the order's history.
+
+Only while the order's `completeRejectedUntil` is present: a deposit the **calling member rejected themselves**, within
+the admin's completion window (Admin portal → Settings → Order Rules, *Complete rejected deposits within*, default 72
+hours after the rejection; 0 turns it off). Never a withdrawal, never another status, never a deposit an administrator
+rejected.
+
+**Request**
+```json
+{
+  "reason": "Payment received after order rejection",
+  "paymentReceived": true
+}
+```
+
+`reason` — **required**, at most 500 characters. The app offers *Payment received after order rejection*, *Payment was
+delayed by the wallet provider*, *Payment was initially missed during verification*, *Payment confirmed after checking
+the transaction history*, or the member's own words.  
+`paymentReceived` — **required**, must be `true`: the member confirms the money is in their account.
+
+The member's free balance (available balance minus their open deposits) must cover the deposit, as when a deposit is
+assigned to them. Repeating a completion that went through answers 200 with the completed order and moves no money again.
+
+**Response 200** — Completed order  
+**Response 400** — `reason` missing, or `paymentReceived` not `true`  
+**Response 403** — Order belongs to a different member, or the deposit was not rejected by this member (an administrator's rejection is left to administrators)  
+**Response 409** — Not a rejected deposit (a withdrawal, another status), the completion window has passed, the feature is off, the order already has wallet postings (needs an administrator), or the member's balance is being updated by another order (retry)  
+**Response 422** — The member's free balance does not cover the deposit (the message gives the figures)  
 **Response 404** — Order not found
 
 ---
@@ -1523,6 +1571,8 @@ All list endpoints return the same paginated envelope:
 | `Reject`                | The member declines the order (reason required) |
 | `ReportAbnormalPayment` | Withdrawal only: the payout failed or its outcome is unknown — goes to admin review |
 | `Cancel`                | Legacy orders only (`Assigned` / `Frozen`). Not offered by the app |
+
+Completing a deposit the member rejected is not an `allowedActions` value: it is offered while the order has `completeRejectedUntil` ([Complete Rejected Deposit](#complete-rejected-deposit)).
 
 ### `AbnormalPaymentReason`
 

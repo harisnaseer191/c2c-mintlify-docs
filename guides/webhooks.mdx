@@ -37,7 +37,7 @@ Webhooks are sent for **final outcomes only**.
 | `order.completed` | The order settled: the member confirmed receipt of a deposit or the payout of a withdrawal, or C2C operations resolved the order as confirmed. **Safe to fulfil.** | `Completed` (or legacy `Confirmed`) |
 | `order.failed` | The order ended without settlement: the member rejected it, the checkout link expired, no member could be assigned in time, or it was cancelled (by C2C operations or automatically) | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto` |
 
-Example `reason` values on `order.failed`: `Checkout expired before payment`, `Failed to assign the order to a member. Please check with support.` (no member could be assigned: within about 10 seconds of the customer submitting their account for a deposit, within 120 minutes for a withdrawal), the member's rejection reason, or the resolution note from C2C operations.
+Example `reason` values on `order.failed`: `Checkout expired before payment`, `Failed to assign the order to a member. Please check with support.` (no member could be assigned to a deposit within about 10 seconds of the customer submitting their account; a withdrawal no member can take goes to C2C operations instead of failing), the member's rejection reason, or the resolution note from C2C operations.
 
 <Note>
   The reason for a failed member assignment changed. It used to be `No eligible member became available in time`. `reason` is free text for humans, so don't branch on it; use `status` (`CancelledTimeout`) instead.

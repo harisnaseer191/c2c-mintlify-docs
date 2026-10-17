@@ -112,8 +112,8 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
   The field is still accepted so that existing integrations don't break: `4` to `8`, `4` by default. You can stop sending it. See [What the customer submits](/guides/payment-methods#what-the-customer-submits).
 </ParamField>
 
-<ParamField body="maxRetryCount" type="integer" default="3">
-  `0` to `10`. Only used by withdrawals: it limits how often C2C reassigns an order to another member. It has no effect on deposits.
+<ParamField body="maxRetryCount" type="integer" default="3" deprecated>
+  Deprecated: still accepted (`0` to `10`) so existing integrations don't break, but ignored. It has no effect on deposits, nor any longer on withdrawals (see [Create withdrawal](/api-reference/endpoints/create-withdrawal)).
 </ParamField>
 
 <ParamField body="signature" type="string" required>

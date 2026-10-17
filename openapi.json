@@ -701,7 +701,8 @@
             "minimum": 0,
             "maximum": 10,
             "default": 3,
-            "description": "Withdrawals: reassignment attempts after the payout window passes."
+            "deprecated": true,
+            "description": "Deprecated: accepted (0 to 10) so existing integrations do not break, but ignored. A withdrawal whose member cannot pay it out (not enough funds, or the payout window passes) goes to another member, never back to the same one, until the withdrawal deadline (120 minutes from creation by default); then, if nobody can take it, to ManualReview. It is never failed for this."
           },
           "signature": {
             "type": "string",

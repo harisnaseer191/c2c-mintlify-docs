@@ -565,6 +565,49 @@ Idempotent: reporting again returns the order under review.
 
 ---
 
+### Return Order (not enough funds)
+
+```
+POST /api/member/orders/{id}/return
+```
+
+**Auth**: Bearer JWT required. **Withdrawals only.**
+
+The member cannot pay the withdrawal out because they do not have enough funds, and **nothing was sent**. The
+withdrawal is **not** failed: it goes to another member who can pay it, and it is **never** given back to this
+member. The member says what they can still pay out of **each** of their accounts with the customer's provider (the
+accounts [List Payout Source Accounts](#list-payout-source-accounts) returns for the order), so they are only given
+withdrawals they can pay from then on (see [Payout balances](#payout-balances)).
+
+A payout that was attempted, or whose outcome is unknown, is **not** a return — report an abnormal payment instead.
+A customer account that is wrong is a rejection.
+
+**Request**
+```json
+{
+  "payoutBalances": [
+    { "paymentAccountId": "460c3924-6c2d-4747-94c7-808c40f325d4", "amount": 3000 }
+  ]
+}
+```
+
+| Field | |
+|---|---|
+| `payoutBalances` | **required** — one entry for every account of the member's with the customer's provider that can send payments; `amount` from 0 to 100,000,000 |
+
+Idempotent: returning again (e.g. after a lost response) answers with the order, which is no longer the member's.
+
+**Response 200** — The order as it now stands: with another member (`AwaitingMemberPayout`), waiting for one
+(`Awaiting`), or under admin review (`ManualReview`, when the withdrawal deadline has passed and nobody else can
+take it). The member receives `OrderReassigned`.  
+**Response 400** — A balance names an account that is not one of the member's approved accounts, or an amount is out of range  
+**Response 409** — `Return` is not in the order's `allowedActions` (e.g. a deposit, or an order already decided)  
+**Response 422** — `code: "member.payoutBalanceRequired"`: an account with the customer's provider is missing from `payoutBalances`  
+**Response 403** — Order belongs to a different member  
+**Response 404** — Order not found
+
+---
+
 ### Upload Order Evidence
 
 ```
@@ -666,8 +709,14 @@ A member with only JazzCash accounts is never given an Easypaisa order, and the 
 deposit is the one route that crosses providers — the money leaves the customer's JazzCash or Easypaisa wallet and
 arrives in the member's bank account — and it is only ever given to a member with a Direct Bank Account.
 
-Withdrawals the member does not pay out in time are reassigned to another member (the previous member
-receives `OrderReassigned`, the new one `OrderAssigned`).
+A withdrawal is only given to a member whose **payout balance** with the customer's provider covers it, on top of
+the withdrawals they already hold (see [Payout balances](#payout-balances)).
+
+A withdrawal the member does not pay out in time, or returns for lack of funds, goes to another member (the
+previous member receives `OrderReassigned`, the new one `OrderAssigned`). It is never given back to a member who
+gave it up. While nobody else can take it, it waits (`Awaiting`); once the platform's withdrawal deadline has passed
+(Admin portal → Settings → Order Rules; default 120 minutes from its creation) with nobody able to take it, it goes
+to admin review (`ManualReview`). It is never failed for this.
 
 **Deposits and the customer checkout.** A deposit has no member while its customer has not started. On the checkout
 page the customer first enters the wallet account number they pay from; only then is an eligible **online** member
@@ -718,7 +767,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you. A deposit arrives ready to act on: `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier` | full order payload (below) |
 | `OrderSubmitted` | The deposit's payment was reported as sent: it is now `AwaitingMemberConfirmation`. The checkout page no longer sends this report, so do not wait for the event — a deposit is confirmed from `OrderAssigned` on | full order payload |
 | `OrderExpired` | Your order expired or was escalated for manual review | `{ "orderId": "…" }` |
-| `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
+| `OrderReassigned` | The order was taken *away* from you: given to another member, or (a withdrawal you returned) waiting for one | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
 | `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
 | `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
@@ -848,6 +897,11 @@ you can still confirm, reject or report them.
 
 > **Note**: Turning either switch on requires at least one approved payment account.
 
+**Turning Receive Withdrawals on asks for payout balances.** Send `payoutBalances` with it: how much you can pay
+out of each of your accounts that can send payments (see [Payout balances](#payout-balances)). Once the platform
+requires it, a request that turns Receive Withdrawals on without a balance for every such account is refused with
+`422` and `code: "member.payoutBalanceRequired"`.
+
 **Request** — start receiving withdrawal orders
 ```json
 {
@@ -856,12 +910,15 @@ you can still confirm, reject or report them.
 }
 ```
 
-**Request** — go from deposits to withdrawals in one call
+**Request** — go from deposits to withdrawals in one call, with the payout balances
 ```json
 {
   "isOnline": true,
   "collectionsEnabled": false,
-  "withdrawalsEnabled": true
+  "withdrawalsEnabled": true,
+  "payoutBalances": [
+    { "paymentAccountId": "460c3924-6c2d-4747-94c7-808c40f325d4", "amount": 25000 }
+  ]
 }
 ```
 
@@ -877,7 +934,43 @@ All fields are optional — send only the ones you want to change; a field left 
 { "data": true }
 ```
 
-**Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account
+**Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account  
+**Response 422** — `code: "member.payoutBalanceRequired"`: Receive Withdrawals turned on without a payout balance for every account that can send payments  
+**Response 400** — A payout balance names an account that is not one of yours and approved, or its amount is out of range
+
+---
+
+### Payout balances
+
+How much the member can pay out of each of their accounts right now. A withdrawal is only given to a member whose
+payout balance **with the customer's provider** — the sum over their accounts of that provider that can send
+payments — covers it, on top of the withdrawals to that provider they already hold. A payout the member confirms
+takes its amount off the account it was paid from. An account's balance is `null` until the member first says it.
+
+The app asks for the balances when the member turns Receive Withdrawals on, lets them correct them at any time, and
+asks again when they return a withdrawal for lack of funds.
+
+```
+PUT /api/member/payout-balances
+```
+
+**Auth**: Bearer JWT required.
+
+**Request**
+```json
+{
+  "balances": [
+    { "paymentAccountId": "460c3924-6c2d-4747-94c7-808c40f325d4", "amount": 25000 },
+    { "paymentAccountId": "9faed4ff-8aab-4e6a-b6b2-e1cf34b4236f", "amount": 0 }
+  ]
+}
+```
+
+`balances` — **required**, at least one; each account at most once; `amount` from 0 to 100,000,000. Only the
+member's own accounts that can send payments (`canFundWithdrawals`) take a balance.
+
+**Response 200** — the member's accounts as they are afterwards ([PaymentAccount](#the-paymentaccount-object)[], with `payoutBalance`)  
+**Response 400** — An account that is not one of the member's approved accounts, an amount out of range, or an account given twice
 
 ---
 
@@ -943,7 +1036,9 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
   "totalOrdersProcessed": 47,
   "lastOrderDate": "2026-06-06T18:30:00Z",
   "createdAt": "2026-01-15T09:00:00Z",
-  "updatedAt": "2026-01-16T10:00:00Z"
+  "updatedAt": "2026-01-16T10:00:00Z",
+  "payoutBalance": 25000.0,
+  "payoutBalanceUpdatedAt": "2026-10-17T09:12:00Z"
 }
 ```
 
@@ -965,6 +1060,7 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
 | `canFundWithdrawals` | Whether it can pay out withdrawals at all (approved, not on hold). Which withdrawals it can pay depends on the customer's provider — see [List Payout Source Accounts](#list-payout-source-accounts) |
 | `isOnHold` / `holdMessage` | An admin placed the account on hold; `holdMessage` is the fixed member-safe text to show verbatim (`null` when not held). The admin's internal reason is never sent to the member app |
 | `rejectionReason` / `deactivationReason` | The admin's reason, for the member to read |
+| `payoutBalance` / `payoutBalanceUpdatedAt` | How much the member says they can pay out of this account, and when they last said it (or a confirmed payout took it down); `null` until they first say. See [Payout balances](#payout-balances) |
 
 Clients show `effectiveStatus` and use `canReceiveDeposits` / `canFundWithdrawals` as given — they never work
 eligibility out from `status` and `isActive`.
@@ -1522,6 +1618,7 @@ All list endpoints return the same paginated envelope:
 | `Confirm`               | Deposit: the customer's payment arrived. Withdrawal: the member sent the payout |
 | `Reject`                | The member declines the order (reason required) |
 | `ReportAbnormalPayment` | Withdrawal only: the payout failed or its outcome is unknown — goes to admin review |
+| `Return`                | Withdrawal only: the member has not enough funds and sent nothing — it goes to another member, never back to them |
 | `Cancel`                | Legacy orders only (`Assigned` / `Frozen`). Not offered by the app |
 
 ### `AbnormalPaymentReason`

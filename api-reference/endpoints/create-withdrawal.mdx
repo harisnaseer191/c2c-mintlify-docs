@@ -10,6 +10,10 @@ Creates a **withdrawal**: a C2C member sends money from their own account to you
 
 Before creating the order, C2C checks that your merchant wallet can fund it (see [Funding check](#funding-check)). If a member is available, they're assigned immediately and the order starts in `AwaitingMemberPayout`. Otherwise the order is still **accepted** with status `Awaiting` and assigned automatically as soon as a member becomes available (see [Awaiting withdrawals](#awaiting-withdrawals)). See the [Withdrawal flow](/guides/withdrawal-flow) for the full lifecycle.
 
+<Warning>
+  **Changed behaviour.** A withdrawal no member could take used to end `CancelledTimeout` after 120 minutes, with an `order.failed` webhook. It now moves to `ManualReview` at its withdrawal deadline (120 minutes from creation by default) and is paid out or cancelled by C2C operations, which sends the final webhook then. A withdrawal whose member can't pay it goes to another member and stays in progress, with no webhook. `maxRetryCount` is deprecated and ignored. If your code waits for `CancelledTimeout` to release a payout, wait for the final webhook instead.
+</Warning>
+
 You can give the customer's receiving account in two ways:
 
 | You send | What happens |
@@ -95,8 +99,8 @@ You can give the customer's receiving account in two ways:
   Absolute `http(s)` URL for this order's [webhooks](/guides/webhooks), up to 500 characters. Defaults to the callback URL in **Merchant Portal → Settings**. It must resolve to a public internet address: loopback, private and link-local addresses are refused at delivery time, and redirects aren't followed.
 </ParamField>
 
-<ParamField body="maxRetryCount" type="integer" default="3">
-  `0` to `10`. If the assigned member doesn't pay out within the payout window (60 minutes by default), C2C reassigns the withdrawal to another available member, up to this many times. After that, the order moves to `ManualReview`.
+<ParamField body="maxRetryCount" type="integer" default="3" deprecated>
+  Deprecated: still accepted (`0` to `10`) so existing integrations don't break, but ignored. A withdrawal whose member can't pay it out — they don't have enough funds, or the payout window (60 minutes by default) passes — now goes to another member who can, never back to the same member, until the withdrawal deadline (120 minutes from the order's creation by default, a platform setting). After that, if nobody can take it, it moves to `ManualReview`. It is never failed for this.
 </ParamField>
 
 <ParamField body="metadata" type="string">
@@ -354,7 +358,7 @@ Fees come from the fee rules C2C configures for your account. The fee is **fixed
 When no eligible member is available, the withdrawal is accepted with status `Awaiting` (stage `Awaiting`). It's assigned automatically as soon as a member becomes available: a member comes online, a member frees capacity, or C2C's once-a-minute background check finds one. It then continues as `AwaitingMemberPayout`.
 
 - While `Awaiting`, its **amount + fee stays reserved** against your balance: it counts as in progress for the funding check and for the Pending amount on your dashboard.
-- If no member becomes available within **120 minutes** (a platform setting), the order ends `CancelledTimeout` and you receive an `order.failed` webhook (`reason`: `Failed to assign the order to a member. Please check with support.`). Nothing is debited.
+- If no member can take it by the withdrawal deadline (120 minutes from the order's creation by default, a platform setting), the order moves to `ManualReview` for C2C operations to pay it out or cancel it. It doesn't fail on its own, and no webhook is sent until C2C resolves it. Nothing is debited meanwhile.
 
 ## Collecting the account on the hosted page
 
@@ -362,7 +366,7 @@ When you create a withdrawal **without** `customerAccountNumber`:
 
 1. The order is accepted as `Awaiting`. Its amount + fee is reserved against your balance like any other withdrawal, but no member is assigned yet.
 2. Redirect the customer to `paymentPageUrl`. The page shows the amount and your name, and asks for the **wallet account number** and the **account holder name**. The wallet type is the `walletType` of the order; the amount cannot be changed.
-3. When the customer submits, C2C stores the account and assigns a member (`AwaitingMemberPayout`), or keeps the order `Awaiting` until a member is available (the 120-minute window starts then).
+3. When the customer submits, C2C stores the account and assigns a member (`AwaitingMemberPayout`), or keeps the order `Awaiting` until a member is available, until the withdrawal deadline (120 minutes from the order's creation by default, a platform setting).
 4. The submitted account is final: it cannot be changed from the page afterwards. Submitting the same details twice has no further effect.
 
 If the customer doesn't submit their account before `expiresAt` (30 minutes), the order ends `CancelledTimeout`, the reservation is released and you receive an `order.failed` webhook (`reason`: `The customer did not provide their withdrawal account in time`). Create a new order to try again.
@@ -374,7 +378,7 @@ Awaiting (no account yet) ──customer submits account──▶ AwaitingMember
    └──not submitted within 30 min──▶ CancelledTimeout (order.failed webhook)
 
 Awaiting ──member available──▶ AwaitingMemberPayout
-   └──no member within 120 min──▶ CancelledTimeout (order.failed webhook)
+   └──no member by the withdrawal deadline (120 min default)──▶ ManualReview (no webhook until C2C resolves it)
 
 AwaitingMemberPayout ──member confirms payout──▶ Completed      (order.completed webhook)
         │
@@ -382,9 +386,10 @@ AwaitingMemberPayout ──member confirms payout──▶ Completed      (order
         │
         ├──member reports an abnormal payment───▶ ManualReview    (no webhook until C2C resolves it)
         │
-        └──payout window passes (60 min default)
-              ├── retries left → reassigned to another member (stays AwaitingMemberPayout)
-              └── no retries left → ManualReview (no webhook until C2C resolves it)
+        └──member has not enough funds, or the payout window passes (60 min default)
+              ├── another member can pay it → given to them (stays AwaitingMemberPayout, no webhook)
+              ├── nobody yet, before the deadline → Awaiting a member (no webhook)
+              └── nobody, deadline passed → ManualReview (no webhook until C2C resolves it)
 ```
 
 <Warning>

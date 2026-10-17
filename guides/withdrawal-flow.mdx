@@ -172,6 +172,6 @@ def pay_out(payout) -> None:
 - **Validate account numbers** before submitting. C2C sends funds to the account you provide.
 - **Mark the payout as paid only on `Completed`.**
 - **`Rejected` is final:** no money was sent and your wallet isn't debited, so you can create a new withdrawal with a new key if appropriate.
-- **`Awaiting` is in progress, not failed.** Don't resubmit the payout; it's assigned automatically or ends `CancelledTimeout` after 120 minutes.
+- **`Awaiting` is in progress, not failed.** Don't resubmit the payout; it's assigned automatically, or moves to `ManualReview` at its withdrawal deadline (120 minutes from creation by default) for C2C operations to resolve.
 - **One live order per `merchantOrderRef`.** You can reuse a reference only after its earlier payout failed.
 - **Reconcile** orders that stay in `Awaiting`, `AwaitingMemberPayout` or `ManualReview` longer than expected.

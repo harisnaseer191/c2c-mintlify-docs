@@ -57,7 +57,7 @@ A deposit requested on a `walletType` is assigned only to a member who has a rec
 
 ### When no account of the method is available
 
-Creating the order never depends on a member being available: a deposit is always accepted as `Queued`, and a member is looked for only when the customer submits the account they pay from. C2C then looks for a member with a receiving account of the requested method and doesn't substitute another method. If none is free, the payment page shows **Assigning Collection Account** with a 10-second countdown and keeps looking. If no member becomes available within those 10 seconds, the order ends `CancelledTimeout` and the page shows "Failed to assign the order to a member. Please check with support." See the [Deposit flow](/guides/deposit-flow).
+Creating the order never depends on a member being available: a deposit is always accepted as `Queued`, and a member is looked for only when the customer submits the account they pay from. C2C then looks for a member with a receiving account of the requested method and doesn't substitute another method. If none is free, the payment page shows **Assigning Collection Account** with a 60-second countdown by default. C2C makes up to 3 assignment attempts, 20 seconds apart. If none succeeds, the order ends `CancelledTimeout` after 60 seconds and the page shows "Failed to assign the order to a member. Please check with support." See the [Deposit flow](/guides/deposit-flow).
 
 ### When the customer changes the method
 

@@ -30,7 +30,7 @@ sequenceDiagram
     C2C-->>Merchant: orderId, paymentPageUrl, status Queued, stage Awaiting (no member yet)
     Merchant-->>Customer: Redirect to paymentPageUrl
     Customer->>Page: Open page, submit the wallet account they pay from
-    Page->>C2C: Assign a member for the payment method (looks for up to 10 seconds)
+    Page->>C2C: Assign a member (up to 3 attempts, 20 seconds apart; 60 seconds total)
     C2C->>Member: Assign order, with the customer's account (AwaitingCustomerPayment)
     Page-->>Customer: Account number, Till ID, QR code or bank account to pay
     Customer->>Member: Send money from wallet app
@@ -71,8 +71,10 @@ The page opens on the method you requested. The customer enters the wallet accou
 Once they submit it, C2C looks for an **eligible member**: online, with an approved receiving account of exactly the requested method, a limit covering the amount, and enough balance to back the deposit. No method falls back to another: `JazzCash` is never given a JazzCash Till ID or QR code, and never an Easypaisa account, and `BankAccount` is only ever given a bank account. See [Exact matching](/guides/payment-methods#exact-matching).
 
 - **Member free:** the member is assigned within a moment and notified in their app. The order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows where to pay.
-- **No member free:** the order moves to `Awaiting` and the page shows **Assigning Collection Account** with a 10-second countdown while C2C keeps looking. If a member becomes available in that time, the order continues as above.
-- **Still nobody after 10 seconds:** the order fails with `CancelledTimeout`. The page shows **"Failed to assign the order to a member. Please check with support."**, and you receive an `order.failed` webhook with that text as its `reason`. The customer is never told why no member was available.
+- **No member free:** the order moves to `Awaiting` and the page shows **Assigning Collection Account** with a 60-second countdown by default. C2C makes up to 3 assignment attempts, 20 seconds apart; if one succeeds, the order continues as above.
+- **Still nobody after 60 seconds:** the order fails with `CancelledTimeout`, without a fourth attempt. The page shows **"Failed to assign the order to a member. Please check with support."**, and you receive an `order.failed` webhook with that text as its `reason`. The customer is never told why no member was available.
+
+`OrderAssignment:DepositAssignmentWaitSeconds` configures the per-attempt interval (default `20` seconds); there are 3 attempts. This does not extend checkout-link expiry or change deadlines already saved on orders.
 
 ### 4. Customer pays
 
@@ -110,8 +112,8 @@ stateDiagram-v2
     Queued --> AwaitingCustomerPayment: customer submits their account, member assigned
     Queued --> Awaiting: customer submits their account, no member free
     Queued --> Expired: link expired before the customer started
-    Awaiting --> AwaitingCustomerPayment: member found within 10 seconds
-    Awaiting --> CancelledTimeout: no member within 10 seconds
+    Awaiting --> AwaitingCustomerPayment: assignment attempt succeeds
+    Awaiting --> CancelledTimeout: 3 attempts failed, 60 seconds elapsed
     AwaitingCustomerPayment --> Completed: member confirms the payment
     AwaitingCustomerPayment --> Rejected: member reports the payment did not arrive
     AwaitingCustomerPayment --> Expired: link expired before the member confirmed
@@ -124,7 +126,7 @@ stateDiagram-v2
 | Status | Stage | Meaning |
 |--------|-------|---------|
 | `Queued` | `Awaiting` | Created. The customer hasn't submitted the account they pay from, and no member is assigned. |
-| `Awaiting` | `Awaiting` | The customer submitted their account and a member is being looked for. At most about 10 seconds. |
+| `Awaiting` | `Awaiting` | The customer submitted their account and a member is being looked for. Up to 3 attempts over 60 seconds by default. |
 | `AwaitingCustomerPayment` | `Assigned` | A member is assigned and the page shows where to pay. Waiting for the payment to arrive and the member to confirm it. |
 | `Completed` | `Completed` | The member confirmed the payment. Your wallet is credited. |
 | `CancelledTimeout`, `Expired`, `Rejected` | `Failed` | Final without settlement. See the table below. |
@@ -135,7 +137,7 @@ A deposit normally goes straight from stage `Assigned` to `Completed`: the membe
 |-----------|--------|---------|
 | Member confirms the payment | `Completed` | `order.completed` |
 | Member reports that the payment did not arrive | `Rejected` | `order.failed` |
-| No member could be assigned within 10 seconds of the customer submitting their account | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) |
+| No member could be assigned during 3 attempts over 60 seconds by default after the customer submits their account | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) |
 | The link expired (30 minutes) before the customer submitted their account, or before the member confirmed a payment | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
 
 <Note>

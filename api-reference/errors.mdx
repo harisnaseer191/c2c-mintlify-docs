@@ -115,7 +115,7 @@ See the [Signature Generation Guide](/api-reference/signature-guide#common-mista
 | `422` | `This Idempotency-Key was already used for a different order request.` | Same key, different `orderType`, `amount`, `walletType`, `currency`, `merchantOrderRef` or `customerAccountNumber`. See [Idempotency](/api-reference/idempotency). |
 
 <Note>
-  There's no "no member available" error on order creation. A deposit is always accepted as `Queued`: a member is looked for when the customer submits the account they pay from on the payment page, and if none can be assigned within about 10 seconds the order ends `CancelledTimeout`. A withdrawal with no eligible member online is accepted with status `Awaiting` and assigned later. See [Order status](/guides/order-status).
+  There's no "no member available" error on order creation. A deposit is always accepted as `Queued`: a member is looked for when the customer submits the account they pay from on the payment page. C2C makes up to 3 assignment attempts, 20 seconds apart by default, and if none succeeds the order ends `CancelledTimeout` after 60 seconds. A withdrawal with no eligible member online is accepted with status `Awaiting` and assigned later. See [Order status](/guides/order-status).
 </Note>
 
 ### Order status and balance

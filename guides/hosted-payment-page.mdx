@@ -52,7 +52,7 @@ The page has the same three steps for all seven [payment methods](/guides/paymen
   <Step title="A collection account is assigned">
     Only now does C2C assign a member and that member's receiving account, of exactly the method being paid. If a member is free this takes a moment and the customer goes straight to the payment details.
 
-    If no member is free, the page shows **Assigning Collection Account** with a **10-second countdown** and keeps looking; the order is `Awaiting` meanwhile. If nobody becomes available within those 10 seconds, the order **fails** (`CancelledTimeout`) and the page shows **"Failed to assign the order to a member. Please check with support."**
+    If no member is free, the page shows **Assigning Collection Account** with a **60-second countdown** by default; the order is `Awaiting` meanwhile. C2C makes up to **3 assignment attempts, 20 seconds apart**. If none succeeds, the order **fails** (`CancelledTimeout`) after 60 seconds and the page shows **"Failed to assign the order to a member. Please check with support."**
 
     The customer is never told why no member was available. You receive an `order.failed` webhook with the same text as its `reason`. To let the customer try again, create a new order: see [Retrying after a failed assignment](/guides/deposit-flow#retrying-after-a-failed-assignment).
   </Step>
@@ -154,7 +154,7 @@ Once a bank account is assigned, the page shows:
 
 The customer sends exactly the order amount to the bank account from the wallet they entered. The member finds the incoming transfer by that wallet account number and confirms the order. As on every method, the number is the customer's claim to check, not proof of payment.
 
-If no bank account can be assigned within the 10 seconds, the order fails exactly as on the other methods: `CancelledTimeout`, **"Failed to assign the order to a member. Please check with support."** and an `order.failed` webhook.
+If no bank account can be assigned during the 3 attempts over 60 seconds by default, the order fails exactly as on the other methods: `CancelledTimeout`, **"Failed to assign the order to a member. Please check with support."** and an `order.failed` webhook.
 
 ### Changing the payment method
 

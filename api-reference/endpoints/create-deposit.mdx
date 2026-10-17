@@ -298,7 +298,7 @@ See [Errors](/api-reference/errors) for the complete error model.
 
 1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 30 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
 2. The customer enters the wallet account number they will pay from: 11 digits starting with `03`. On `BankAccount` they first choose whether that wallet is JazzCash or Easypaisa. Only then does C2C assign a member.
-3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID, QR code or bank account to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 10-second countdown. If nobody becomes available within those 10 seconds, the order fails with `CancelledTimeout` and the `reason` `Failed to assign the order to a member. Please check with support.`
+3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID, QR code or bank account to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 60-second countdown by default. C2C makes up to 3 assignment attempts, 20 seconds apart. If none succeeds, the order fails with `CancelledTimeout` after 60 seconds and the `reason` `Failed to assign the order to a member. Please check with support.`
 4. The customer pays the exact amount in their wallet app. They submit nothing afterwards: no transaction ID and no payment confirmation.
 5. The member confirms the order when the payment arrives from the account the customer gave (`Completed`), or rejects it if the payment did not arrive (`Rejected`). If the payment isn't confirmed before the link expires, the order becomes `Expired`.
 6. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
@@ -306,10 +306,10 @@ See [Errors](/api-reference/errors) for the complete error model.
 | Status | Stage | Meaning |
 |--------|-------|---------|
 | `Queued` | `Awaiting` | Created. The customer hasn't submitted the account they pay from. No member assigned. |
-| `Awaiting` | `Awaiting` | A member is being looked for, for at most about 10 seconds |
+| `Awaiting` | `Awaiting` | A member is being looked for, with up to 3 attempts over 60 seconds by default |
 | `AwaitingCustomerPayment` | `Assigned` | Member assigned and account shown. Waiting for the payment to arrive and the member to confirm it. |
 | `Completed` | `Completed` | Payment confirmed. Your wallet is credited. |
-| `CancelledTimeout` | `Failed` | No member could be assigned within the 10 seconds |
+| `CancelledTimeout` | `Failed` | No member could be assigned during the 3 attempts over 60 seconds by default |
 | `Expired` | `Failed` | The link expired before the customer started, or before the member confirmed a payment |
 | `Rejected` | `Failed` | The member reports that the payment did not arrive |
 

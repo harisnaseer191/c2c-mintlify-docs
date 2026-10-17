@@ -722,7 +722,7 @@ to admin review (`ManualReview`). It is never failed for this.
 page the customer first enters the wallet account number they pay from; only then is an eligible **online** member
 assigned and that member's account number, Till ID, QR code or bank account shown to the customer. The order reaches the member
 with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier`. If no
-member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
+member is free, the checkout makes up to 3 assignment attempts, 20 seconds apart by default, then fails after 60 seconds without ever reaching a member.
 Once an account has been shown the order never moves — the customer may already have paid — and the member can
 confirm or reject it even after going offline. The member confirms when the payment arrives from the customer's
 account; an order not confirmed before the checkout link expires (30 minutes after the order was created) becomes

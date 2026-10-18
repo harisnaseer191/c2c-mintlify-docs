@@ -382,7 +382,8 @@ Awaiting ──member available──▶ AwaitingMemberPayout
 
 AwaitingMemberPayout ──member confirms payout──▶ Completed      (order.completed webhook)
         │
-        ├──member rejects────────────────────────▶ Rejected       (order.failed webhook)
+        ├──member rejects: customer's wallet can't receive ▶ Rejected (order.failed webhook)
+        ├──member rejects for a reason of their own (no balance, wallet unavailable, limit) ▶ another member, as below
         │
         ├──member reports an abnormal payment───▶ ManualReview    (no webhook until C2C resolves it)
         │

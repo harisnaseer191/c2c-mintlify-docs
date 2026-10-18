@@ -74,7 +74,8 @@ If the member cannot complete the payout normally — the account details are wr
 | What happens | Status | Webhook | Your wallet |
 |--------------|--------|---------|-------------|
 | Member confirms the payout | `Completed` | `order.completed` | − (amount + fee) |
-| Member rejects the order | `Rejected` | `order.failed` | unchanged |
+| Member rejects the order because the customer's wallet can't receive the payout | `Rejected` | `order.failed` | unchanged |
+| Member rejects it for a reason of their own (not enough balance, their wallet account unavailable, transfer limit reached) | stays in progress, given to another member (or `Awaiting` one) | none | unchanged |
 | Member has not enough funds, or the payout window (60 min by default) passes, and another member can pay it | stays `AwaitingMemberPayout`, given to another member | none | unchanged |
 | Same, nobody else can take it yet | `Awaiting` until a member can | none | unchanged |
 | Same, the withdrawal deadline has passed and nobody can take it | `ManualReview` | none until resolved | unchanged until resolved |
@@ -95,7 +96,7 @@ stateDiagram-v2
     AwaitingMemberPayout --> AwaitingMemberPayout: not enough funds or window passed, given to another member
     AwaitingMemberPayout --> Awaiting: not enough funds or window passed, nobody else free yet
     AwaitingMemberPayout --> Completed: member confirms payout
-    AwaitingMemberPayout --> Rejected: member rejects
+    AwaitingMemberPayout --> Rejected: member rejects, customer's wallet can't receive
     AwaitingMemberPayout --> ManualReview: deadline passed, nobody else can take it
     AwaitingMemberPayout --> ManualReview: member reports an abnormal payment
     ManualReview --> Completed: resolved by C2C

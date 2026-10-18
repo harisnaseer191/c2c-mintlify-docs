@@ -503,8 +503,16 @@ POST /api/member/orders/{id}/reject
 
 **Auth**: Bearer JWT required.
 
-The member declines the order: the deposit did not arrive, or they will not pay the withdrawal out. Nothing was
-settled, so nothing is reversed.
+The member declines the order. Nothing was settled, so nothing is reversed.
+
+- **Deposit** — the customer's payment did not arrive: the order fails (`Rejected`) and the merchant is told.
+- **Withdrawal** — the order fails (`Rejected`) **only** when the reason is that the customer's wallet cannot receive
+  the payout (`"Cannot send to this wallet"`). For any other reason — the member's own (`"Not enough balance in my
+  wallet"`, `"My wallet account is unavailable"`, `"Transfer limit reached"`) or their own words — the withdrawal goes
+  to **another member** instead, never back to this one, exactly like [Return Order](#return-order-not-enough-funds);
+  the response is the order as it now stands (`AwaitingMemberPayout` with another member, `Awaiting`, or
+  `ManualReview` past the withdrawal deadline) and the member receives `OrderReassigned`. Prefer Return for lack of
+  funds: it also updates the member's payout balances.
 
 **Request**
 ```json

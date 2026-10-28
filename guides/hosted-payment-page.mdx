@@ -26,7 +26,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 | Property | Detail |
 |----------|--------|
 | Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
-| Lifetime | **30 minutes** from order creation (`expiresAt` in the response) |
+| Lifetime | **30 minutes** from order creation (`expiresAt` in the response) to start the checkout. For a deposit whose account to pay has been shown, the link keeps working after that, until the order ends. |
 | Wallet | `wallet` is the [payment method](/guides/payment-methods) (`walletType`) you requested: `jazzcash`, `jazzcashtillid`, `jazzcashqr`, `easypaisa`, `easypaisatillid`, `easypaisaqr` or `bank` (a `BankAccount` deposit). The page opens directly on that method. `wallet` isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
 | Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
@@ -63,7 +63,7 @@ The page has the same three steps for all seven [payment methods](/guides/paymen
 
     The member who received the money confirms the order when the payment arrives from the account the customer gave. The page then shows the confirmation by itself and, if you set `successUrl`, returns the customer to your site. If the customer reloads or reopens the link meanwhile, the page shows the same payment details again.
 
-    If the payment is not confirmed before the link expires (30 minutes after the order was created), the order becomes `Expired`.
+    Once the account is shown the order doesn't expire, and the link keeps working: the customer may already have paid, so the order waits until the member confirms the payment or reports that it did not arrive.
   </Step>
 </Steps>
 

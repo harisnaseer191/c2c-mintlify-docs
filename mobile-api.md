@@ -363,8 +363,8 @@ checkout page, **before** a member is assigned. A deposit therefore reaches the 
 No transaction ID and no IBAN digits are asked for. The member **confirms** when a payment of the order's amount
 arrives from that account, or **rejects** if it does not. The customer reports nothing after paying: the checkout
 page no longer has an "I have sent the payment" button, so the order stays `AwaitingCustomerPayment` until the member
-decides. An order that is not confirmed expires with the customer's checkout link, 30 minutes after the order was
-created (`Expired`). `AwaitingMemberConfirmation` and the `OrderSubmitted` event remain for an order whose payment was
+decides. It does not expire: the customer may already have paid into your account, so it stays with you until you
+confirm or reject it, however long that takes. `AwaitingMemberConfirmation` and the `OrderSubmitted` event remain for an order whose payment was
 reported as sent (now only when an administrator sets that status): the same two actions apply, and such an order is
 escalated to `ManualReview` instead when the member does not decide within their confirmation window.
 
@@ -724,8 +724,8 @@ with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's a
 member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
 Once an account has been shown the order never moves — the customer may already have paid — and the member can
 confirm or reject it even after going offline. The member confirms when the payment arrives from the customer's
-account; an order not confirmed before the checkout link expires (30 minutes after the order was created) becomes
-`Expired`.
+account, or rejects it if the payment does not arrive. It never expires, and `expiresAt` is `null`: the checkout link
+keeps working for the customer, and the order stays with the member until they decide.
 
 **Going offline.** Only online members with Collections enabled are assigned new orders. Online / Collections
 change **only** through `PATCH /api/member/availability` (or an admin) — closing the app, losing the network or
@@ -824,8 +824,8 @@ For a deposit, `paymentAccountWalletType` is the member's account type (one of t
 `payerIdentifier` / `payerIdentifierKind` (`PayerWalletNumber`) carry the account the customer says they pay from —
 `customerSubmittedTxnRef` stays `null`. `payerWalletProvider` (`JazzCash` | `Easypaisa`) is the provider of that
 wallet, and `paymentAccountBankName` the bank of the member's account when it is a bank account (`null` for every
-wallet account). The order expires with the customer's checkout link (`paymentPageExpiresAt`,
-30 minutes after it was created) if it has not been confirmed by then. The app does not put the payer identifier in
+wallet account). The order does not expire once it is assigned: `expiresAt` is `null`, and `paymentPageExpiresAt`
+only says until when the customer's link was valid for starting the checkout. The app does not put the payer identifier in
 the toast for the event; it is read from the refetched order on Order Details.
 
 ### Get Pending Notifications & Open Orders
@@ -1556,7 +1556,7 @@ All list endpoints return the same paginated envelope:
 | `AwaitingMemberPayout`       | Withdrawal assigned to you — pay out to the customer account                |
 | `Completed`                  | Confirmed by you (terminal)                                                 |
 | `Rejected`                   | Rejected by you                                                             |
-| `Expired`                    | The deposit was not confirmed before the customer's checkout link expired (30 minutes after the order was created) |
+| `Expired`                    | The customer's checkout link expired before they started. An order assigned to you no longer expires; older orders may show it |
 | `ManualReview`               | With an admin: escalated (e.g. not confirmed in time) or reported as an abnormal payment. Do not pay it again |
 | `Assigned`                   | Legacy: assigned — awaiting confirmation                                    |
 | `Frozen`                     | Legacy: freeze time passed — still awaiting confirmation                    |

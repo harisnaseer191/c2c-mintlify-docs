@@ -329,7 +329,7 @@ member's own account.
 | `payerIdentifierSubmittedAt` | When the customer submitted it |
 | `customerSubmittedTxnRef` | **Orders created before this release only** (`proofKind: TransactionIdDigits`): the last digits of the TID the customer *said* they paid with — a claim, **not verification**. The customer is no longer asked for a transaction ID, so it is `null` on every new order |
 | `customerSubmittedTxnRefAt` | When the customer submitted it (`null` on every new order) |
-| `memberTxnRefNo` | **Withdrawal**: the last 4 digits of the member's payout TID. **Deposit**: the member's optional reference |
+| `memberTxnRefNo` | **Withdrawal**: the member's payout TID — the full TID, in upper case, when the customer's wallet is JazzCash or Easypaisa; the last 4 digits when it is a bank account (and on wallet withdrawals completed before the full TID was required). **Deposit**: the member's optional reference |
 | `evidence[]` | Images attached to the order: `{ id, kind, contentType, sizeBytes, uploadedAt }`. `kind` is `CustomerPaymentProof` (deposit, uploaded by the customer — not verification), `MemberPayoutProof` or `AbnormalPaymentEvidence` (withdrawal, uploaded by the member). Fetch the bytes from [Get Order Evidence](#get-order-evidence) |
 | `allowedActions` | What the assigned member may do **now**: any of `Confirm`, `Reject`, `ReportAbnormalPayment`, `Cancel`. Render action buttons from this list — never from status comparisons. `Cancel` is legacy-only; the app does not offer it |
 
@@ -420,7 +420,7 @@ POST /api/member/orders/{id}/confirm
 ```
 
 `memberTxnRefNo` — optional for deposits: the member's own reference, e.g. the last digits of the incoming
-transaction ID (at most 20 characters). The app sends it only when the member typed one. A deposit can be confirmed
+transaction ID (at most 32 characters). The app sends it only when the member typed one. A deposit can be confirmed
 as soon as it is assigned (`AwaitingCustomerPayment`): before confirming, look in your wallet app (your banking app for a
 Direct Bank Account) for a payment of the
 order's amount from `payerIdentifier` (see [What the customer submits](#what-the-customer-submits-proofkind)) — it is
@@ -432,7 +432,7 @@ release with `proofKind: TransactionIdDigits`, compare `customerSubmittedTxnRef`
 ```json
 {
   "sourcePaymentAccountId": "3f1c…",
-  "memberTxnRefNo": "4821"
+  "memberTxnRefNo": "0123456789"
 }
 ```
 
@@ -442,29 +442,43 @@ release with `proofKind: TransactionIdDigits`, compare `customerSubmittedTxnRef`
   JazzCash customer from one of your JazzCash accounts, an Easypaisa customer from one of your Easypaisa
   accounts; another provider is refused with 400. An account you switched off for
   receiving deposits can still be used; a pending, rejected, admin-deactivated or on-hold one cannot.
-- `memberTxnRefNo` — **exactly the last 4 digits** (0–9) of the outgoing transaction ID (TID). It is kept for
-  reconciliation; it is not proof of payment.
+- `memberTxnRefNo` — the outgoing transaction ID (TID). What it must be depends on the customer's wallet
+  (`customerWalletType`), as below. It is kept for reconciliation; it is not proof of payment.
+
+| Customer's wallet | `memberTxnRefNo` |
+|-------------------|------------------|
+| JazzCash or Easypaisa (`JazzCash`, `Easypaisa`, `EasypaisaTillID`, …) | The **full TID**: 4 to 32 letters or digits, with no spaces or symbols. It is trimmed and upper-cased before it is checked and stored, so `ab12cd34ef` is stored as `AB12CD34EF`. A TID completes only one withdrawal of its provider, and it cannot be the TID of a payment received into a wallet (both refused with 409) |
+| Bank account (`BankAccount`) | **Exactly the last 4 digits** (0–9) of the TID, as before |
 
 Sending the same confirmation again (same account and TID, e.g. after a lost response) returns 200 with the
 completed order without settling it twice.
 
+For a wallet withdrawal the TIDs are compared after normalization: sending `ab12cd34ef` again after `AB12CD34EF`,
+with the same account, still returns 200.
+
 **Response 200** — Confirmed order
 ```json
 {
-  "data": { "id": "abc123...", "status": "Completed", "paymentAccountId": "3f1c…", "memberTxnRefNo": "4821", ... }
+  "data": { "id": "abc123...", "status": "Completed", "paymentAccountId": "3f1c…", "memberTxnRefNo": "0123456789", ... }
 }
 ```
 
 **Response 400** — Order cannot be confirmed (`Confirm` is not in its `allowedActions` — the message says why), or a withdrawal completion is invalid:
   - `Select the wallet account you sent the payment from.`
-  - `Enter the last 4 digits of the transaction ID (TID) of your payment.`
-  - `The TID must be exactly the last 4 digits of the transaction ID (numbers only).`
+  - `code: "order.tidRequired"` — `Enter the full transaction ID (TID) of your payment.` (JazzCash or Easypaisa customer, no TID)
+  - `code: "order.tidInvalid"` — `The TID must be 4 to 32 letters or digits, with no spaces or symbols.` (JazzCash or Easypaisa customer)
+  - `Enter the last 4 digits of the transaction ID (TID) of your payment.` (bank-account customer)
+  - `The TID must be exactly the last 4 digits of the transaction ID (numbers only).` (bank-account customer)
   - `The selected source account is not one of your wallet accounts.`
   - `The selected source account is on hold by the administrator. Choose another account or contact support.`
   - `The selected source account is not approved for payments. Choose one of your approved accounts.`
   - `Your JazzCash Account Number account cannot send to a Easypaisa wallet. Choose one of your Easypaisa accounts.` (the source is with another provider than the customer's wallet)
 
-**Response 409** — The order was updated concurrently; reload and try again  
+**Response 409** — The order was updated concurrently; reload and try again. Or, for a JazzCash or Easypaisa
+customer, the TID was refused: nothing is settled and the order is unchanged, so correct the TID and confirm again:
+  - `code: "order.tidAlreadyUsed"` — `This TID is already used on another completed withdrawal. Check the TID and try again.`
+  - `code: "order.tidMatchesIncomingPayment"` — `This TID belongs to a payment you received, not one you sent. Enter the TID of your payout.`
+
 **Response 403** — Order belongs to a different member  
 **Response 404** — Order not found
 

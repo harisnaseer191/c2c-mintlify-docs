@@ -88,7 +88,7 @@ The customer sends exactly the order amount from the account they gave, using th
 | `EasypaisaQR` | Their Easypaisa account number | The QR code to scan or save |
 | `BankAccount` | The wallet they pay from (JazzCash or Easypaisa) and its account number | The bank name, account title and account number to pay, each with a copy button |
 
-No transaction ID and no IBAN digits are asked for, and the customer reports nothing after paying. The page has an **Open JazzCash Wallet** or **Open Easypaisa Wallet** button that takes them to their wallet app; using it doesn't change the order. The order stays `AwaitingCustomerPayment` until the member confirms or rejects it, or the link expires. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
+No transaction ID and no IBAN digits are asked for, and the customer reports nothing after paying. The page has an **Open JazzCash Wallet** or **Open Easypaisa Wallet** button that takes them to their wallet app; using it doesn't change the order. The order stays `AwaitingCustomerPayment` until the member confirms or rejects it. It doesn't expire, and the link keeps working, because the customer may already have paid. See [Hosted payment page](/guides/hosted-payment-page#what-your-customer-sees) for each screen.
 
 ### 5. Member confirms
 
@@ -96,7 +96,8 @@ The member sees the order in their app together with the account the customer ga
 
 - **Payment arrived, member confirms** → `Completed`. Your wallet is credited **amount − fee**, and an `order.completed` webhook is sent. The page shows the confirmation and returns the customer to your `successUrl`.
 - **Member reports that the payment did not arrive** → `Rejected`, and an `order.failed` webhook is sent.
-- **Not confirmed before the link expires** (30 minutes after the order was created) → `Expired`, and an `order.failed` webhook is sent.
+
+Once the account is shown, the order never expires: it waits for the member's decision however long it takes.
 
 ### 6. Fulfil
 
@@ -114,7 +115,6 @@ stateDiagram-v2
     Awaiting --> CancelledTimeout: no member within 10 seconds
     AwaitingCustomerPayment --> Completed: member confirms the payment
     AwaitingCustomerPayment --> Rejected: member reports the payment did not arrive
-    AwaitingCustomerPayment --> Expired: link expired before the member confirmed
     Completed --> [*]
     Rejected --> [*]
     Expired --> [*]
@@ -137,10 +137,10 @@ A deposit normally goes straight from stage `Assigned` to `Completed`: the membe
 | Member reports that the payment did not arrive | `Rejected` | `order.failed` |
 | The payment arrives after the member rejected the order, and the member completes it (within 72 hours by default) | `Rejected` → `Completed` | `order.completed`, after the earlier `order.failed` |
 | No member could be assigned within 10 seconds of the customer submitting their account | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) |
-| The link expired (30 minutes) before the customer submitted their account, or before the member confirmed a payment | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
+| The link expired (30 minutes) before the customer submitted their account | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
 
 <Note>
-  An `Expired` order can belong to a customer who did pay, but whose payment wasn't confirmed before the link expired. An order that failed can later be completed, by C2C operations or, for a deposit its member rejected, by the member when the payment arrives late; you then receive `order.completed` after the earlier `order.failed`. See [Webhooks](/guides/webhooks#events).
+  A deposit expires only before a member's account is shown, so its customer had nowhere to pay yet. (Orders from before this rule could expire after the account was shown, while the customer may have paid.) An order that failed can later be completed, by C2C operations or, for a deposit its member rejected, by the member when the payment arrives late; you then receive `order.completed` after the earlier `order.failed`. See [Webhooks](/guides/webhooks#events).
 </Note>
 
 <Note>

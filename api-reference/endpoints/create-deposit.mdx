@@ -130,7 +130,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
       C2C's unique order ID. **Store it.** You need it for [status queries](/api-reference/endpoints/query-order-status), and it is the `orderId` in webhooks.
     </ResponseField>
     <ResponseField name="paymentPageUrl" type="string">
-      Hosted payment page for this order. Redirect the customer here. The URL is pre-signed and stops working at `expiresAt`. Don't modify it, and don't expose it to anyone other than the paying customer.
+      Hosted payment page for this order. Redirect the customer here. The URL is pre-signed. The customer must start before `expiresAt`; once a member's account has been shown to them, the link keeps working after that. Don't modify it, and don't expose it to anyone other than the paying customer.
     </ResponseField>
     <ResponseField name="status" type="string">
       Initial status: always `Queued` for a new deposit. The order is created, the customer hasn't started on the payment page, and no member is assigned yet. See [Order status](/guides/order-status).
@@ -145,7 +145,7 @@ The order is **always accepted** with status `Queued` and stage `Awaiting`. **No
       C2C's human-readable reference, for example `ORD-20261008120620-3f6b`. Quote it to support.
     </ResponseField>
     <ResponseField name="expiresAt" type="string">
-      ISO 8601 UTC time when the payment page link expires, **30 minutes** after creation.
+      ISO 8601 UTC time, **30 minutes** after creation, by which the customer must start on the payment page (submit the account they pay from). Once a member is assigned and the account to pay is shown, the order no longer expires.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -296,11 +296,11 @@ See [Errors](/api-reference/errors) for the complete error model.
 
 ## What happens next
 
-1. Redirect the customer to `paymentPageUrl` **immediately**. The link expires after 30 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
+1. Redirect the customer to `paymentPageUrl` **immediately**. The customer must start within 30 minutes. The order stays `Queued` (stage `Awaiting`) until the customer starts.
 2. The customer enters the wallet account number they will pay from: 11 digits starting with `03`. On `BankAccount` they first choose whether that wallet is JazzCash or Easypaisa. Only then does C2C assign a member.
 3. If a member is free, the order moves to `AwaitingCustomerPayment` (stage `Assigned`) and the page shows the account number, Till ID, QR code or bank account to pay. If none is free, the order is `Awaiting` while the page shows "Assigning Collection Account" with a 10-second countdown. If nobody becomes available within those 10 seconds, the order fails with `CancelledTimeout` and the `reason` `Failed to assign the order to a member. Please check with support.`
 4. The customer pays the exact amount in their wallet app. They submit nothing afterwards: no transaction ID and no payment confirmation.
-5. The member confirms the order when the payment arrives from the account the customer gave (`Completed`), or rejects it if the payment did not arrive (`Rejected`). If the payment isn't confirmed before the link expires, the order becomes `Expired`.
+5. The member confirms the order when the payment arrives from the account the customer gave (`Completed`), or rejects it if the payment did not arrive (`Rejected`). Once the account is shown the order doesn't expire: the customer may already have paid, so it waits for the member's decision however long it takes.
 6. You receive a [webhook](/guides/webhooks), and you can [query the status](/api-reference/endpoints/query-order-status) at any time. If you set `successUrl` / `failureUrl`, the payment page sends the customer back to you.
 
 | Status | Stage | Meaning |
@@ -310,7 +310,7 @@ See [Errors](/api-reference/errors) for the complete error model.
 | `AwaitingCustomerPayment` | `Assigned` | Member assigned and account shown. Waiting for the payment to arrive and the member to confirm it. |
 | `Completed` | `Completed` | Payment confirmed. Your wallet is credited. |
 | `CancelledTimeout` | `Failed` | No member could be assigned within the 10 seconds |
-| `Expired` | `Failed` | The link expired before the customer started, or before the member confirmed a payment |
+| `Expired` | `Failed` | The link expired before the customer started. An order whose account was shown never expires. |
 | `Rejected` | `Failed` | The member reports that the payment did not arrive |
 
 To let the customer try again after a `CancelledTimeout`, create a new order with a new `Idempotency-Key`. You can reuse the same `merchantOrderRef`, because the earlier order failed.

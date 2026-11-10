@@ -320,7 +320,7 @@ member's own account.
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
 | `rejectAvailableAt` | When the member may first reject the order: a **deposit** can only be rejected once the admin's *deposit reject threshold* (default 10 minutes) has passed since `assignedAt`. Absent when rejecting is not delayed (withdrawals, a threshold of 0) or `Reject` is not in `allowedActions`. Informational only: the app never compares it with the phone's clock, which may be set wrong. Tapping Reject always opens the reason sheet and the API decides — a rejection that is too early is refused with 422 `order.rejectNotYetAllowed` and the time left, which the app shows before closing the sheet. Confirming is never delayed |
-| `completeRejectedUntil` | **Rejected deposit the member rejected themselves**: until when they may still complete it, because the customer's payment arrived late — see [Complete Rejected Deposit](#complete-rejected-deposit). Absent for every other order: withdrawals, a deposit an administrator rejected, one rejected longer ago than the admin's completion window (default 72 hours), or when administrators turned the feature off. Show the **Mark as payment received** action only while it is present and in the future; the API decides either way |
+| `completeRejectedUntil` | **Rejected deposit the member rejected themselves, or that was auto-rejected while assigned to them**: until when they may still complete it, because the customer's payment arrived late — see [Complete Rejected Deposit](#complete-rejected-deposit). Absent for every other order: withdrawals, a deposit an administrator rejected, one rejected longer ago than the admin's completion window (default 72 hours), or when administrators turned the feature off. Show the **Mark as payment received** action only while it is present and in the future; the API decides either way |
 | `proofKind` | **Deposit**: what the customer of this order gave so the member can find the payment — [`OrderProofKind`](#orderproofkind). `PayerWalletNumber` on every new deposit, whatever the payment method; `TransactionIdDigits` and `PayerIbanLastFour` only appear on orders created before this release. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
 | `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method, and on a Bank Account deposit the JazzCash or Easypaisa wallet they send the bank transfer from (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
 | `payerIdentifierKind` | `PayerWalletNumber` \| `null` — what `payerIdentifier` is (`PayerIbanLastFour` only on orders created before this release) |
@@ -363,10 +363,14 @@ checkout page, **before** a member is assigned. A deposit therefore reaches the 
 No transaction ID and no IBAN digits are asked for. The member **confirms** when a payment of the order's amount
 arrives from that account, or **rejects** if it does not. The customer reports nothing after paying: the checkout
 page no longer has an "I have sent the payment" button, so the order stays `AwaitingCustomerPayment` until the member
-decides. It does not expire: the customer may already have paid into your account, so it stays with you until you
-confirm or reject it, however long that takes. `AwaitingMemberConfirmation` and the `OrderSubmitted` event remain for an order whose payment was
-reported as sent (now only when an administrator sets that status): the same two actions apply, and such an order is
-escalated to `ManualReview` instead when the member does not decide within their confirmation window.
+decides. It does not expire with the checkout link, but it is **auto-rejected** when it is still open after the admin's
+*Auto-reject open deposits after* time (Admin portal → Settings → Order Rules, default 60 minutes after `assignedAt`;
+0 turns it off): it becomes `Rejected` with `cancellationReason` `Auto-rejected: not completed within 60 minutes of
+assignment.`, the member receives `OrderExpired`, and the merchant is told it failed. If the payment arrives after that,
+the member completes it as a [rejected deposit](#complete-rejected-deposit). `AwaitingMemberConfirmation` and the
+`OrderSubmitted` event remain for an order whose payment was reported as sent (now only when an administrator sets that
+status): the same two actions and the same auto-reject time apply. While auto-reject is on, such an order is no longer
+escalated to `ManualReview` when the member does not decide within their confirmation window; with it off, it is.
 
 `TransactionIdDigits` (the last digits of a transaction ID, in `customerSubmittedTxnRef`) and `PayerIbanLastFour` (the
 last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
@@ -562,7 +566,8 @@ it settles the order exactly like a confirmation (the member's balance is debite
 merchant is credited the amount less its fee, on the terms fixed for the order) and sends the merchant
 `order.completed`. The rejection stays in the order's history.
 
-Only while the order's `completeRejectedUntil` is present: a deposit the **calling member rejected themselves**, within
+Only while the order's `completeRejectedUntil` is present: a deposit the **calling member rejected themselves**, or one
+the system **auto-rejected** while it was assigned to them (it was still open after the admin's auto-reject time), within
 the admin's completion window (Admin portal → Settings → Order Rules, *Complete rejected deposits within*, default 72
 hours after the rejection; 0 turns it off). Never a withdrawal, never another status, never a deposit an administrator
 rejected.
@@ -738,8 +743,9 @@ with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's a
 member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
 Once an account has been shown the order never moves — the customer may already have paid — and the member can
 confirm or reject it even after going offline. The member confirms when the payment arrives from the customer's
-account, or rejects it if the payment does not arrive. It never expires, and `expiresAt` is `null`: the checkout link
-keeps working for the customer, and the order stays with the member until they decide.
+account, or rejects it if the payment does not arrive. It never expires with the checkout link, and `expiresAt` is
+`null`: the checkout link keeps working for the customer, and the order stays with the member until they decide or the
+admin's auto-reject time (default 60 minutes after assignment) rejects it.
 
 **Going offline.** Only online members with Collections enabled are assigned new orders. Online / Collections
 change **only** through `PATCH /api/member/availability` (or an admin) — closing the app, losing the network or
@@ -779,7 +785,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 |---|---|---|
 | `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you. A deposit arrives ready to act on: `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier` | full order payload (below) |
 | `OrderSubmitted` | The deposit's payment was reported as sent: it is now `AwaitingMemberConfirmation`. The checkout page no longer sends this report, so do not wait for the event — a deposit is confirmed from `OrderAssigned` on | full order payload |
-| `OrderExpired` | Your order expired or was escalated for manual review | `{ "orderId": "…" }` |
+| `OrderExpired` | Your order expired, was auto-rejected (a deposit still open after the auto-reject time), or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
 | `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |

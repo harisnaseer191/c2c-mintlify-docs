@@ -26,7 +26,7 @@ https://<payment-page-host>/pay?order_id=788fcae0-...&expires=1791462080&signatu
 | Property | Detail |
 |----------|--------|
 | Pre-signed | C2C signs `order_id` and `expires`. Any modification makes the link invalid. |
-| Lifetime | **30 minutes** from order creation (`expiresAt` in the response) to start the checkout. For a deposit whose account to pay has been shown, the link keeps working after that, until the order ends. |
+| Lifetime | **1 hour** from order creation (`expiresAt` in the response) to start the checkout. For a deposit whose account to pay has been shown, the link keeps working after that, until the order ends. |
 | Wallet | `wallet` is the [payment method](/guides/payment-methods) (`walletType`) you requested: `jazzcash`, `jazzcashtillid`, `jazzcashqr`, `easypaisa`, `easypaisatillid`, `easypaisaqr` or `bank` (a `BankAccount` deposit). The page opens directly on that method. `wallet` isn't part of the signature. |
 | Audience | Only the paying customer. Anyone with the link can see the payment instructions for that order. |
 | Withdrawals | A URL is returned for withdrawals too. The page never asks the customer to pay: it collects their receiving account when you didn't send one, and shows the payout's progress. See [Withdrawals](#withdrawals). |
@@ -171,7 +171,7 @@ For a [withdrawal](/api-reference/endpoints/create-withdrawal) the page works th
     - **Wallet Account Number** — checked against the order's `walletType` (JazzCash / Easypaisa: an 11-digit mobile account number such as `03001234567`; `+92…` is accepted and normalised)
     - **Account Holder Name**
 
-    The wallet provider is the order's `walletType` and the amount is the order's `amount`; the customer can change neither. They must submit before the link expires (30 minutes), otherwise the order ends `CancelledTimeout`.
+    The wallet provider is the order's `walletType` and the amount is the order's `amount`; the customer can change neither. They must submit before the link expires (1 hour), otherwise the order ends `CancelledTimeout`.
   </Step>
   <Step title="Processing">
     After submitting — or immediately, when you sent the account yourself — the page shows that the withdrawal is being processed, with the wallet, the account (all but the last 4 digits hidden) and the account holder name. It updates by itself. Reloading the page returns here; the submitted account cannot be edited, and submitting the same details again has no effect.

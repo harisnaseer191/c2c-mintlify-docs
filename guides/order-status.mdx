@@ -79,8 +79,8 @@ A deposit goes straight from `Assigned` to `Completed`: the member's confirmatio
     | Status | Meaning |
     |--------|---------|
     | `Rejected` | Member rejected the order. Deposit: the member reports that the payment did not arrive. If the payment arrives late, the member can still complete the deposit (within 72 hours by default): it becomes `Completed` and you receive `order.completed`. |
-    | `Expired` | Deposit checkout link (30 minutes) expired before the customer submitted their account. A deposit whose account was shown never expires. |
-    | `CancelledTimeout` | No member could be assigned in time. Deposit: none became available within about 10 seconds of the customer submitting their account. Withdrawal: none within 120 minutes, or the customer didn't enter their account within 30 minutes. The `reason` is `Failed to assign the order to a member. Please check with support.` when no member could be assigned. |
+    | `Expired` | Deposit checkout link (1 hour) expired before the customer submitted their account. A deposit whose account was shown never expires. |
+    | `CancelledTimeout` | No member could be assigned in time. Deposit: none became available within about 10 seconds of the customer submitting their account. Withdrawal: none within 120 minutes, or the customer didn't enter their account within 1 hour. The `reason` is `Failed to assign the order to a member. Please check with support.` when no member could be assigned. |
     | `Cancelled` | Cancelled by C2C or the member |
     | `CancelledAuto` | Cancelled automatically by the system |
   </Tab>
@@ -99,7 +99,7 @@ Use both mechanisms:
 
 | Phase | Interval |
 |-------|----------|
-| Customer is on the payment page (first ~30 minutes of a deposit) | every 5–10 s |
+| Customer is on the payment page (first hour of a deposit) | every 5–10 s |
 | `Awaiting` withdrawal (up to 120 minutes) | every 1–2 min |
 | Waiting for member confirmation or payout | every 30–60 s |
 | `ManualReview` | every 10–15 min |

@@ -62,7 +62,7 @@ Your merchant fee is fixed when the order is accepted. It's re-quoted only if th
 
 ### 2. Redirect the customer
 
-Send the customer to `paymentPageUrl` right away. The link is valid for **30 minutes**. See [Hosted payment page](/guides/hosted-payment-page).
+Send the customer to `paymentPageUrl` right away. The link is valid for **1 hour**. See [Hosted payment page](/guides/hosted-payment-page).
 
 ### 3. Customer gives the account they pay from, and a member is assigned
 
@@ -137,7 +137,7 @@ A deposit normally goes straight from stage `Assigned` to `Completed`: the membe
 | Member reports that the payment did not arrive | `Rejected` | `order.failed` |
 | The payment arrives after the member rejected the order, and the member completes it (within 72 hours by default) | `Rejected` → `Completed` | `order.completed`, after the earlier `order.failed` |
 | No member could be assigned within 10 seconds of the customer submitting their account | `CancelledTimeout` | `order.failed` (`reason`: `Failed to assign the order to a member. Please check with support.`) |
-| The link expired (30 minutes) before the customer submitted their account | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
+| The link expired (1 hour) before the customer submitted their account | `Expired` | `order.failed` (`reason`: `Checkout expired before payment`) |
 
 <Note>
   A deposit expires only before a member's account is shown, so its customer had nowhere to pay yet. (Orders from before this rule could expire after the account was shown, while the customer may have paid.) An order that failed can later be completed, by C2C operations or, for a deposit its member rejected, by the member when the payment arrives late; you then receive `order.completed` after the earlier `order.failed`. See [Webhooks](/guides/webhooks#events).
@@ -234,7 +234,7 @@ def on_c2c_order_update(order_id: str) -> None:
 - **Store `orderId` and your `Idempotency-Key`** with your order before you redirect.
 - **Use webhooks and reconcile:** every final outcome sends a webhook, but `ManualReview` doesn't until it's resolved, and deliveries can fail.
 - **Don't fulfil early:** `Queued`, `Awaiting` and `AwaitingCustomerPayment` are all in-progress states.
-- **Redirect straight away.** No member is held for the order until the customer submits their account, and the link is valid for 30 minutes only.
+- **Redirect straight away.** No member is held for the order until the customer submits their account, and the link is valid for 1 hour only.
 - **Don't read `Queued` as "member assigned".** A new deposit is `Queued` with stage `Awaiting` until the customer starts; a member is assigned from `AwaitingCustomerPayment` on.
 - **Treat `ManualReview` as pending.** The customer may have paid, so don't ask them to pay again until C2C resolves it.
 - **One live order per `merchantOrderRef`.** To let the customer try again after a failed order, for example one that ended `CancelledTimeout` because no member could be assigned, create a new order (new `Idempotency-Key`); you can reuse the same `merchantOrderRef`.

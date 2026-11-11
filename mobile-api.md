@@ -159,14 +159,28 @@ GET /api/member/me
         "accountHolderName": "Ali Hassan",
         "isActive": true,
         "status": "Approved",
-        "accountTypeLabel": "JazzCash Account Number"
+        "accountTypeLabel": "JazzCash Account Number",
+        "orderLimit": 20,
+        "amountLimit": 50000.00,
+        "limitPeriod": "Daily",
+        "limitsSetAt": "2026-11-10T09:00:00+05:00",
+        "receiveUsage": {
+          "ordersReceived": 12, "amountReceived": 30000.00, "ordersOpen": 2, "amountOpen": 5000.00,
+          "ordersLeft": 6, "amountLeft": 15000.00, "isFull": false,
+          "periodStartedAt": "2026-11-10T00:00:00+05:00", "resetsAt": "2026-11-11T00:00:00+05:00"
+        }
       }
     ],
     "createdAt": "2026-01-15T09:00:00Z",
-    "withdrawalRequestsEnabled": false
+    "withdrawalRequestsEnabled": false,
+    "receiveLimitsRequired": false
   }
 }
 ```
+
+`activePaymentAccounts` are the accounts deposits are paid into now, each with its [receive limits](#receive-limits)
+and what counts against them (`receiveUsage`). `receiveLimitsRequired` is `true` while one of them has no limits yet
+(`limitsSetAt: null`): turning Collections on asks for them first (see [Update Availability](#update-availability)).
 
 `withdrawalRequestsEnabled` says whether the member can send a new [withdrawal request](#withdrawal-requests). It is
 `false` for now (server setting `MemberFinance:WithdrawalRequestsEnabled`). While it is `false`, or absent, the app
@@ -205,6 +219,7 @@ GET /api/member/orders
 | `orderType`| string   | —       | `Deposit` or `Withdrawal`                |
 | `fromDate` | datetime | —       | Filter from date (ISO 8601)              |
 | `toDate`   | datetime | —       | Filter to date (ISO 8601)                |
+| `paymentAccountId` | uuid | —   | Only the orders on one of the member's own accounts: deposits paid into it, withdrawals paid out of it |
 
 The list is the member's **whole** order history — every type and status — newest first (`createdAt` descending,
 ties broken by `id`, so the order never changes between requests). Search, filters and paging all run on the server
@@ -217,6 +232,14 @@ after the last order the member already has, so orders created in the meantime n
 following a cursor; when they change, start again without one. To show new orders, fetch the first page again.
 `page` still works for a numbered list. An invalid `cursor` is refused with `400`.
 
+**The account a deposit was paid into.** Every deposit with a member carries the member's own receiving account —
+`paymentAccountId`, `accountNumber`, `accountHolderName`, `accountTypeLabel`, `walletType`, `bankName` — so a list can
+show which of the member's accounts (and so which wallet app) to check for the payment. The member app shows it in full
+under **Received in** on every deposit card. Filtering by stage uses `statuses`: the app offers "Waiting for customer
+payment" (`AwaitingCustomerPayment`), "Needs your confirmation" (`AwaitingMemberConfirmation`), "Needs your payment"
+(`AwaitingMemberPayout`), "Needs your action / overdue" (`Assigned`, `Frozen`), "Under admin review" (`ManualReview`),
+"Completed", "Rejected" and "Cancelled or expired", besides whole outcomes.
+
 **Search** matches part of any of these, ignoring case: `orderReference`, `txnRefNo`, `memberTxnRefNo`,
 `customerSubmittedTxnRef`, `payerIdentifier` (the customer's account of a deposit) and `customerAccountNumber` (the
 customer's account of a withdrawal). It never matches the merchant's own reference or customer id, and never another
@@ -226,6 +249,7 @@ member's orders.
 ```
 GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
 GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20
+GET /api/member/orders?orderType=Deposit&statuses=AwaitingCustomerPayment&paymentAccountId=8c6b1c3a-...
 GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20&cursor=NjM5MjU1NzM...
 ```
 
@@ -718,7 +742,9 @@ A member is eligible when they are **online** (`isOnline`, set through `PATCH /a
 (`withdrawalsEnabled`) for a withdrawal — have
 a wallet account for the order (below), the order currency matches theirs, the amount is within their pay limit
 (deposits) / draw limit (withdrawals), they have a free slot under their concurrent-order limit, and — for
-deposits — their **available wallet balance covers the amount**.
+deposits — their **available wallet balance covers the amount** and one of their receiving accounts for the order
+**has room for it under its [receive limits](#receive-limits)**. The account shown to the customer is picked at random
+among the member's accounts with room, so an account that is full is passed over while another one still takes deposits.
 
 **Fair distribution.** Orders are given to the eligible online members in rotation: the member who has waited longest
 since their last order gets the next one, and members level on that are picked at random. How many orders a member
@@ -922,6 +948,37 @@ you can still confirm, reject or report them.
 
 > **Note**: Turning either switch on requires at least one approved payment account.
 
+**Turning Collections on asks for the receive limits.** Every account deposits are paid into (`canReceiveDeposits`)
+must have its [receive limits](#receive-limits) set before Collections can be turned on. Send them in the same request
+as `receiveLimits` (the same items as [Set Receive Limits](#set-receive-limits)); an account whose limits were set
+before need not be sent again. Without them the request is refused with `422` and code `member.receiveLimitsRequired`,
+and nothing changes. Members who already had Collections on when limits were introduced stay on.
+
+The member app asks for the limits every time Collections is turned on, starting from what was saved last (a new
+account: empty fields, period **Daily**), and sends them with the switch.
+
+> **Collection App and other clients.** A client that turns Collections on but does not show the limits form must
+> check `receiveLimitsRequired` on [Get My Profile](#get-my-profile) first, and handle `422` `member.receiveLimitsRequired`:
+> tell the member to **open the C2C Members app → Account Management → Receive limits** (or turn Collections on there),
+> set the order limit and amount limit of each receiving account, and then try again. Never send limits on the member's
+> behalf.
+
+**Request** — turn Collections on, with the receive limits of each receiving account
+```json
+{
+  "isOnline": true,
+  "collectionsEnabled": true,
+  "receiveLimits": [
+    { "paymentAccountId": "8c6b1c3a-...", "orderLimit": 20, "amountLimit": 50000, "period": "Daily" }
+  ]
+}
+```
+
+**Response 422** — a receiving account has no receive limits yet
+```json
+{ "error": "Set the order limit and amount limit of each of your receiving accounts before enabling collections (0 means no limit).", "code": "member.receiveLimitsRequired" }
+```
+
 **Request** — start receiving withdrawal orders
 ```json
 {
@@ -1017,7 +1074,22 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
   "totalOrdersProcessed": 47,
   "lastOrderDate": "2026-06-06T18:30:00Z",
   "createdAt": "2026-01-15T09:00:00Z",
-  "updatedAt": "2026-01-16T10:00:00Z"
+  "updatedAt": "2026-01-16T10:00:00Z",
+  "orderLimit": 20,
+  "amountLimit": 50000.00,
+  "limitPeriod": "Daily",
+  "limitsSetAt": "2026-11-10T09:00:00+05:00",
+  "receiveUsage": {
+    "ordersReceived": 12,
+    "amountReceived": 30000.00,
+    "ordersOpen": 2,
+    "amountOpen": 5000.00,
+    "ordersLeft": 6,
+    "amountLeft": 15000.00,
+    "isFull": false,
+    "periodStartedAt": "2026-11-10T00:00:00+05:00",
+    "resetsAt": "2026-11-11T00:00:00+05:00"
+  }
 }
 ```
 
@@ -1039,6 +1111,9 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
 | `canFundWithdrawals` | Whether it can pay out withdrawals at all (approved, not on hold). Which withdrawals it can pay depends on the customer's provider — see [List Payout Source Accounts](#list-payout-source-accounts) |
 | `isOnHold` / `holdMessage` | An admin placed the account on hold; `holdMessage` is the fixed member-safe text to show verbatim (`null` when not held). The admin's internal reason is never sent to the member app |
 | `rejectionReason` / `deactivationReason` | The admin's reason, for the member to read |
+| `orderLimit` / `amountLimit` / `limitPeriod` | The account's [receive limits](#receive-limits): at most `orderLimit` deposits and `amountLimit` of money per [`ReceiveLimitPeriod`](#receivelimitperiod). `0` = no limit |
+| `limitsSetAt` | When the member last saved the limits; `null` until they have (switching the account or Collections on asks for them first) |
+| `receiveUsage` | What counts against the limits now — see [Receive limits](#receive-limits). Filled by the account lists; `null` on a just-created account |
 
 Clients show `effectiveStatus` and use `canReceiveDeposits` / `canFundWithdrawals` as given — they never work
 eligibility out from `status` and `isActive`.
@@ -1169,7 +1244,10 @@ MemberId is derived from JWT — do not send it in the body.
   "provider": "Easypaisa",
   "accountType": "TillId",
   "accountNumber": "764310",
-  "accountHolderName": "Ali Hassan"
+  "accountHolderName": "Ali Hassan",
+  "orderLimit": 20,
+  "amountLimit": 50000,
+  "limitPeriod": "Daily"
 }
 ```
 
@@ -1202,6 +1280,7 @@ MemberId is derived from JWT — do not send it in the body.
 | `accountNumber` | The identifier. **Account number**: 11 digits `03XXXXXXXXX` (`+92…` / `92…` forms and spaces/dashes are normalised). **Till ID**: 4–12 digits. **QR**: the wallet number (`03XXXXXXXXX`, normalised the same way) **or** the Till ID (4–12 digits) the QR code belongs to. **Bank account**: the bank account number or IBAN, 8–34 letters and digits (spaces/dashes are removed) |
 | `accountHolderName` | Required, at most 200 characters. For a bank account: the account title |
 | `bankName` | **Bank account only — required.** The name of the bank the account is with, e.g. `Meezan Bank`, at most 100 characters. Ignored for every other type |
+| `orderLimit` / `amountLimit` / `limitPeriod` | The new account's [receive limits](#receive-limits) (`0` = no limit; period `Daily` when left out). The member app always asks for them. Left out (older apps), the account has no limits yet and asks for them before it is switched on. Ignored by [Update Payment Account](#update-payment-account) |
 | `qrImageBase64` | **`Qr` only — required when adding.** The QR code image as base64 (a `data:image/…;base64,` prefix is accepted; the app sends the bare base64). JPEG, PNG or WebP, at most 5 MB, at least 200×200 px. Sending it with any other `accountType` is a 400 |
 
 (`walletType` alone is still accepted from older app versions.)
@@ -1313,7 +1392,65 @@ The member's own switch. Switching off stops new deposits; the account can still
 
 **Response 200**  
 **Response 400** — The account is not `Approved`  
-**Response 409** — Switching **on** an account that is on hold (the hold message)
+**Response 409** — Switching **on** an account that is on hold (the hold message)  
+**Response 422** — Switching **on** an account whose receive limits were never set: code `member.receiveLimitsRequired`. Set them with [Set Receive Limits](#set-receive-limits), then switch it on. (The app asks for them first, then switches the account on.)
+
+---
+
+### Receive limits
+
+Each account deposits are paid into has two limits the member sets, counted per period:
+
+| Limit | Meaning |
+|---|---|
+| `orderLimit` | The most deposits the account may receive in one period. `0` = no limit |
+| `amountLimit` | The most money the account may receive in one period. `0` = no limit |
+| `limitPeriod` | When the count starts again: `Daily` (from 00:00 PKT, the default), `Monthly` (from the 1st, 00:00 PKT) or `Never` (counts from when the member chose it, until they change it) |
+
+**What counts** (`receiveUsage`): the deposits into the account **completed** in the current period
+(`ordersReceived` / `amountReceived`) plus its **open** deposits (`ordersOpen` / `amountOpen`) — an open deposit holds its
+room so two deposits in flight can never take the account over its limit. As with the member's balance, a deposit whose
+customer has not reported paying once the unpaid-deposit hold has passed stops holding room (it counts again if it
+completes). Withdrawals paid out of the account never count. `ordersLeft` / `amountLeft` are what is left (`null` for a
+limit of `0`); `isFull` is `true` when the order limit is reached or nothing is left of the amount limit; `resetsAt` is
+when the count starts again (`null` for `Never`).
+
+**At assignment** a deposit is only given to an account with room for it: below its order limit, and the deposit's
+amount fits in what is left of its amount limit. A member whose receiving accounts for the customer's method are all
+full gets no deposit of that method; admins see the reason ("Account order limit reached" / "Account amount limit
+reached") in the order's diagnosis. Money that already arrived is never refused — it just counts.
+
+### Set Receive Limits
+
+```
+PUT /api/member/payment-accounts/receive-limits
+```
+
+**Auth**: Bearer JWT required.
+
+Sets the receive limits of some of the member's own accounts. It never changes the account's approval and works while
+the account has orders in progress — it only decides which **new** deposits it gets. Choosing another period starts
+its count afresh; changing only the limits keeps what was counted. Every change is in the account's audit trail.
+
+**Request**
+```json
+{
+  "limits": [
+    { "paymentAccountId": "8c6b1c3a-...", "orderLimit": 20, "amountLimit": 50000, "period": "Daily" },
+    { "paymentAccountId": "460c3924-...", "orderLimit": 0, "amountLimit": 0, "period": "Monthly" }
+  ]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `paymentAccountId` | One of the member's own accounts (not removed); each at most once; at most 50 |
+| `orderLimit` | Whole number, `0`–`100000` (`0` = no limit) |
+| `amountLimit` | `0`–`1000000000` (`0` = no limit) |
+| `period` | [`ReceiveLimitPeriod`](#receivelimitperiod); `Daily` when left out |
+
+**Response 200** — the member's accounts as they are afterwards, each with its `receiveUsage`  
+**Response 400** — a limit out of range, or an account that is not the member's
 
 ---
 
@@ -1702,6 +1839,14 @@ Backend-computed from `status`, `isActive`, the hold and archival. This is what 
 | `Archived`           | Removed (not returned to the member app) | no | no           |
 
 The two right-hand columns are for orientation only — read `canReceiveDeposits` / `canFundWithdrawals`.
+
+### `ReceiveLimitPeriod`
+
+| Value | The count of an account's [receive limits](#receive-limits) starts again |
+|---|---|
+| `Daily` | every day at 00:00 PKT (the default) |
+| `Monthly` | on the 1st of every month at 00:00 PKT |
+| `Never` | never: it counts from when the member chose this period until they change it |
 
 ### `UserStatus`
 

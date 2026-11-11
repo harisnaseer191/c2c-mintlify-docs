@@ -247,7 +247,9 @@ GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20&cursor=N
         "status": "AwaitingCustomerPayment",
         "currency": "PKR",
         "amount": 5000.00,
-        "commissionAmount": 125.00,
+        "commissionAmount": null,
+        "commissionRate": 0.025,
+        "expectedCommission": 125.00,
         "orderReference": "ORD-20260607-001",
         "txnRefNo": null,
         "memberTxnRefNo": null,
@@ -316,7 +318,9 @@ member's own account.
 | `accountTypeLabel` | Display name of the member's account type, e.g. `"JazzCash Till ID"`, `"JazzCash QR"`, `"Direct Bank Account"` (`null` when there is no account yet) |
 | `accountNumber` | The member's account number or Till ID. **QR deposit**: the wallet number / Till ID the member registered for that QR code. **Bank Account deposit**: the member's bank account number or IBAN |
 | `bankName` | The bank of the member's own account when it is a bank account (`walletType: BankAccount`), e.g. `"Meezan Bank"`; `null` for every wallet account and while the order has no member account |
-| `commissionAmount` | The member's reward; `null` until it is known |
+| `commissionAmount` | The commission paid to the member when the order completed; `null` until then |
+| `commissionRate` | The member's commission rate for this order (e.g. `0.025` = 2.5%), fixed when the order is assigned to them from their day/night rate for the order type (the shift the order was created in). If the order is reassigned, it is set again from the new member's rate. `null` while the order has no member |
+| `expectedCommission` | **The member's reward**: what completing the order earns, `amount × commissionRate` rounded to 4 decimal places — the same amount completion pays. Once the order completed it equals `commissionAmount`. `null` while the order has no member. Show this as the order's reward; an older API without it only had `commissionAmount` |
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
 | `rejectAvailableAt` | When the member may first reject the order: a **deposit** can only be rejected once the admin's *deposit reject threshold* (default 10 minutes) has passed since `assignedAt`. Absent when rejecting is not delayed (withdrawals, a threshold of 0) or `Reject` is not in `allowedActions`. Informational only: the app never compares it with the phone's clock, which may be set wrong. Tapping Reject always opens the reason sheet and the API decides — a rejection that is too early is refused with 422 `order.rejectNotYetAllowed` and the time left, which the app shows before closing the sheet. Confirming is never delayed |
@@ -788,7 +792,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | `OrderExpired` | Your order expired, was auto-rejected (a deposit still open after the auto-reject time), or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
-| `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
+| `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount", "commissionRate", "expectedCommission" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
 | `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
 
 **`PaymentAccountUpdated` payload**
@@ -819,6 +823,8 @@ is the fixed member-safe hold text while the account is on hold. On this event t
   "status": "AwaitingCustomerPayment",
   "amount": 1000.0,
   "currency": "PKR",
+  "commissionRate": 0.015,
+  "expectedCommission": 15.0,
   "paymentAccountId": "…",
   "paymentAccountWalletType": "JazzCash",
   "paymentAccountNumber": "03001234567",

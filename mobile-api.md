@@ -819,7 +819,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
 | `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount", "commissionRate", "expectedCommission" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
-| `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
+| `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts, or you switched one yourself in any app. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
 
 **`PaymentAccountUpdated` payload**
 ```json
@@ -836,9 +836,13 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 ```
 
 `change` is `Approved`, `Rejected`, `Held`, `HoldReleased`, `Deactivated`, `Reactivated`, `SwitchedOn` or
-`SwitchedOff` (the last two only when an admin flips the switch — the member's own toggle is not echoed). `message`
+`SwitchedOff` (the last two when an admin flips the switch, sent for each account the change touched), or
+`SwitchedOnByMember` / `SwitchedOffByMember` when the member switched the account themselves, in any app. A member's
+switch-on sends one event, for the account switched on; the accounts it switched off get none, so reload the whole list
+on every `PaymentAccountUpdated`. Treat an unknown `change` as "the account was updated". `message`
 is the fixed member-safe hold text while the account is on hold. On this event the app refreshes
-`GET /api/member/payment-accounts` and shows a toast such as "Your JazzCash Till ID ending 6443 was approved".
+`GET /api/member/payment-accounts` and shows a toast such as "Your JazzCash Till ID ending 6443 was approved"; it shows
+no toast for `SwitchedOnByMember` / `SwitchedOffByMember`, which the member made themselves.
 
 **Full order payload**
 ```json
@@ -1228,6 +1232,38 @@ GET /api/member/payment-accounts
 
 ---
 
+### Get My Receiving Account
+
+```
+GET /api/member/payment-accounts/receiving
+```
+
+**Auth**: Bearer JWT required (the member's token; a Collection App uses the token from its own member login).
+
+The one account of this member that is **active and can receive deposits** right now: approved, switched on by the
+member, not on hold and not removed. A member has at most one (see
+[Switch Receive-Deposits On / Off](#switch-receive-deposits-on--off)). A Collection App uses it to know which wallet
+account to watch for incoming customer payments.
+
+**Response 200** — `{ "data": PaymentAccount }`, the same object as one item of
+[List My Payment Accounts](#list-my-payment-accounts), with `canReceiveDeposits: true` and `effectiveStatus: "Active"`.
+Receive limits do not decide it: an account that has used up its limits is still returned, and its
+`receiveUsage.isFull` is `true` (it gets no new deposits until the period resets or the member raises the limits).
+
+**Response 200** — `{ "data": null }` when no account can receive deposits: none is switched on, or the switched-on one
+is on hold, deactivated by an administrator, or waiting for approval after an edit.
+
+**Response 404** — The token does not belong to a member.
+
+**Response 409** — code `member.multipleReceivingAccounts`: the member still has more than one account receiving from
+before the one-account rule. A read never picks one for them; send the member to the Member App to choose the account
+to keep.
+
+Read it again on every `PaymentAccountUpdated` event, since a switch, hold, deactivation or approval can change the
+answer.
+
+---
+
 ### Add Payment Account
 
 ```
@@ -1389,6 +1425,25 @@ PUT /api/member/payment-accounts/{id}/toggle-status
 ```
 
 The member's own switch. Switching off stops new deposits; the account can still fund withdrawals.
+
+Only **one receiving account per member** may be switched on, across all wallet types. Switching an account on
+switches the member's other non-archived accounts off in the same database transaction; switching one off never
+switches another on. Simultaneous requests from different apps or devices (Member App, Collection App) and admins are
+serialized per member. Admin switches and reactivation use the same rule; releasing a hold on an enabled approved
+account also resolves any legacy conflict. Approval, payout balances and withdrawal eligibility of the other accounts
+are unchanged: every approved account that is not on hold can still send withdrawal payments. Deposit instructions
+already shown to customers stay valid and are audited when their account is switched off.
+
+After a successful toggle, reload the **whole** account list (`GET /api/member/payment-accounts`); do not just update
+the tapped switch locally. The change is also pushed to the member's connected apps as
+`PaymentAccountUpdated` with `change` `SwitchedOnByMember` or `SwitchedOffByMember`
+(one event, for the account the member switched), so a Collection App and the Member App stay in step. Before switching
+an account on while another one is on, the Member App asks the member to confirm, naming the account that will be
+switched off.
+
+A member may still have more than one account switched on from before this rule. Reads never change that: the member
+selects the account to keep, and switching on an account that is already on (`isActive: true`) switches the others
+off. The Member App shows such a member a "Receive deposits only here" action on each receiving account.
 
 **Response 200**  
 **Response 400** — The account is not `Approved`  

@@ -1232,6 +1232,38 @@ GET /api/member/payment-accounts
 
 ---
 
+### Get My Receiving Account
+
+```
+GET /api/member/payment-accounts/receiving
+```
+
+**Auth**: Bearer JWT required (the member's token; a Collection App uses the token from its own member login).
+
+The one account of this member that is **active and can receive deposits** right now: approved, switched on by the
+member, not on hold and not removed. A member has at most one (see
+[Switch Receive-Deposits On / Off](#switch-receive-deposits-on--off)). A Collection App uses it to know which wallet
+account to watch for incoming customer payments.
+
+**Response 200** — `{ "data": PaymentAccount }`, the same object as one item of
+[List My Payment Accounts](#list-my-payment-accounts), with `canReceiveDeposits: true` and `effectiveStatus: "Active"`.
+Receive limits do not decide it: an account that has used up its limits is still returned, and its
+`receiveUsage.isFull` is `true` (it gets no new deposits until the period resets or the member raises the limits).
+
+**Response 200** — `{ "data": null }` when no account can receive deposits: none is switched on, or the switched-on one
+is on hold, deactivated by an administrator, or waiting for approval after an edit.
+
+**Response 404** — The token does not belong to a member.
+
+**Response 409** — code `member.multipleReceivingAccounts`: the member still has more than one account receiving from
+before the one-account rule. A read never picks one for them; send the member to the Member App to choose the account
+to keep.
+
+Read it again on every `PaymentAccountUpdated` event, since a switch, hold, deactivation or approval can change the
+answer.
+
+---
+
 ### Add Payment Account
 
 ```

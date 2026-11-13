@@ -18,7 +18,7 @@
 6. [Payment Accounts](#payment-accounts)
 7. [Recharge Requests](#recharge-requests)
 8. [Withdrawal Requests](#withdrawal-requests)
-9. [Platform Accounts (Public)](#platform-accounts)
+9. [Platform Accounts](#platform-accounts)
 10. [Error Format](#error-format)
 11. [Pagination Format](#pagination-format)
 12. [Enum Reference](#enum-reference)
@@ -1523,7 +1523,7 @@ POST /api/member/recharge-requests
 }
 ```
 
-- `platformRechargeAccountId` — **required**. The active platform account you sent money to (see [Platform Accounts](#platform-accounts)). Its wallet type, number and holder name are stored on the request at submission.
+- `platformRechargeAccountId` — **required**. The platform account you sent money to: one of the accounts [List My Platform Accounts](#list-my-platform-accounts) returns for you. Its wallet type, number and holder name are stored on the request at submission. An account that is not (or no longer) offered to you is refused with `400` "Select the platform account you sent the funds to."
 - `transactionIdLast4` — **required**. Exactly the last 4 digits of the wallet transaction ID (TID); finance matches it against the platform account statement.
 - `sourceAccountDetails` — **required**. The account you paid from.
 - `transactionId`, `screenshotProof` — optional. If the full `transactionId` is sent it must end in `transactionIdLast4`.
@@ -1615,13 +1615,36 @@ sent before the switch are still listed and reviewed.
 
 ## Platform Accounts
 
+### List My Platform Accounts
+
+```
+GET /api/member/platform-accounts
+```
+
+**Auth**: Bearer JWT required (member).
+
+The active platform accounts **you** may send a recharge to, in display order (`displayPriority`, then oldest
+first). This is the list the Deposit screen shows and the one to pick `platformRechargeAccountId` from. Members may be
+offered different accounts, so always load it for the signed-in member rather than caching one list for everyone, and
+load it again when the screen opens: an account can be added, withdrawn or stop being offered to you at any time.
+
+Same fields as [List Active Platform Accounts](#list-active-platform-accounts) below. Fields that describe the
+account's own history (`totalRechargeCount`, `totalApprovedAmount`, `lastRechargeDate`) are always `0`/`null`, and who
+created it is not returned (`createdByUserId` is all zeros, `createdByName` is `null`).
+
+**Response 200** — same shape as below.  
+**Response 401** — not signed in.  
+**Response 404** — the signed-in account is not a member.
+
 ### List Active Platform Accounts
 
 ```
 GET /api/platform-accounts/active
 ```
 
-No authentication required. Shows the platform's recharge accounts that members should send money to when submitting a recharge request.
+No authentication required. The recharge accounts offered to every member. The app uses
+[List My Platform Accounts](#list-my-platform-accounts) instead, which can include more accounts for the signed-in
+member; this public list stays for older app versions.
 
 On the app's Deposit (recharge) screen every account — JazzCash, Easypaisa or bank — is shown as three separate
 fields: **Bank Name** (`bankDisplayName`), **Account Number** (`accountNumber`) and **Account Title**

@@ -15,13 +15,14 @@
 3. [Orders](#orders)
 4. [Realtime Order Delivery](#realtime-order-delivery)
 5. [Availability](#availability)
-6. [Payment Accounts](#payment-accounts)
-7. [Recharge Requests](#recharge-requests)
-8. [Withdrawal Requests](#withdrawal-requests)
-9. [Platform Accounts (Public)](#platform-accounts)
-10. [Error Format](#error-format)
-11. [Pagination Format](#pagination-format)
-12. [Enum Reference](#enum-reference)
+6. [Device & Location Sharing](#device--location-sharing)
+7. [Payment Accounts](#payment-accounts)
+8. [Recharge Requests](#recharge-requests)
+9. [Withdrawal Requests](#withdrawal-requests)
+10. [Platform Accounts (Public)](#platform-accounts)
+11. [Error Format](#error-format)
+12. [Pagination Format](#pagination-format)
+13. [Enum Reference](#enum-reference)
 
 ---
 
@@ -1016,6 +1017,94 @@ All fields are optional — send only the ones you want to change; a field left 
 
 ---
 
+## Device & Location Sharing
+
+### Report Device
+
+```
+PUT /api/member/device
+```
+
+**Auth**: Bearer JWT required.
+
+Tells the platform which phone and which version of the member app this member is using, whether they share their
+location, and, only when they do, where the phone is. The platform keeps **one record per member and installation**:
+the first report creates it, every later one updates it.
+
+The member app sends it after login, whenever the app comes back to the foreground, right after the member changes
+their location choice, and then every `reportIntervalSeconds` (from the response) while the app stays in the
+foreground. It never reports from the background. Reporting is fire-and-forget: a failed report is not shown to the
+member and is simply made again next time.
+
+**Location sharing is optional and needs the member's consent.** The app asks once after login (on that phone) and the
+member can change their answer any time from the menu. The app works the same whether or not they share.
+
+**Request**
+```json
+{
+  "installationId": "3f2a6c1e-8a9b-4c1d-9e2f-0a1b2c3d4e5f",
+  "platform": "android",
+  "osVersion": "14",
+  "manufacturer": "samsung",
+  "model": "SM-A546E",
+  "appVersion": "1.4.0",
+  "appBuild": 57,
+  "locationConsent": "Granted",
+  "location": {
+    "latitude": 31.52037,
+    "longitude": 74.358749,
+    "accuracyMeters": 12.5,
+    "capturedAt": "2026-11-23T10:00:00Z"
+  }
+}
+```
+
+| Field | Required | Rules |
+|---|---|---|
+| `installationId` | yes | 8–64 letters, digits or hyphens. A UUID the app makes once and keeps (it survives logout; reinstalling the app makes a new one). |
+| `platform` | yes | `android` or `ios` |
+| `osVersion` | no | up to 32 characters (Android's release, e.g. `"14"`) |
+| `manufacturer`, `model` | no | up to 64 characters each |
+| `appVersion` | yes | 1–64 characters: the app's version, e.g. `"1.4.0"` for a release or `"1.4.0-dev.23f73a6"` for a test build |
+| `appBuild` | yes | 0 or more: the app's build number (Android version code) |
+| `locationConsent` | yes | see [`LocationConsent`](#locationconsent) |
+| `location` | no | `null` or omitted unless `locationConsent` is `Granted` — a location with any other consent is refused (`400`) |
+
+`location`:
+
+| Field | Rules |
+|---|---|
+| `latitude` | −90 to 90 |
+| `longitude` | −180 to 180 |
+| `accuracyMeters` | `null`, or 0 to 100000 |
+| `capturedAt` | when the phone took the fix (ISO-8601, send UTC with `Z`). A fix taken more than 24 hours ago or more than 5 minutes ahead of the server's clock (a phone with a wrong clock) is ignored; the rest of the report is still stored |
+
+**What the platform does with it**
+
+- The device record's app version, phone details and last-seen time are updated on every report.
+- With a `location`, it becomes the device's latest location, unless the stored one was taken later. It is also
+  added to the device's location history, unless the history's previous reading is less than 5 minutes older. Location history is kept for **30 days**; a
+  latest location older than that is cleared too.
+- `Declined` withdraws consent: the device's latest location is cleared and its location history deleted.
+- `NotAsked` and `PermissionDenied` store nothing new; a latest location from before stays as the last known one.
+
+**Response 200**
+```json
+{ "data": { "deviceId": "8d0c5a1e-...", "locationStored": true, "reportIntervalSeconds": 600 } }
+```
+
+| Field | Meaning |
+|---|---|
+| `deviceId` | the platform's id of this member's device record |
+| `locationStored` | `true` when this report's location became the latest one (`false` without a location, or when it was ignored or older than the stored one) |
+| `reportIntervalSeconds` | how often to report while the app is in the foreground |
+
+**Response 400** — a field breaks the rules above, e.g. a `location` sent while `locationConsent` is not `Granted`.
+The member app then sends the report once more without the location, so the phone and app version are still
+recorded.
+
+---
+
 ## Payment Accounts
 
 A member registers accounts of **seven types**: six wallet types — a **provider** (JazzCash / Easypaisa) and what
@@ -1870,6 +1959,15 @@ The two right-hand columns are for orientation only — read `canReceiveDeposits
 | `Daily` | every day at 00:00 PKT (the default) |
 | `Monthly` | on the 1st of every month at 00:00 PKT |
 | `Never` | never: it counts from when the member chose this period until they change it |
+
+### `LocationConsent`
+
+| Value | Meaning |
+|---|---|
+| `NotAsked` | the member has not answered the app's location question yet |
+| `Granted` | the member agreed in the app **and** Android lets the app read the location |
+| `Declined` | the member said no, or turned sharing off later |
+| `PermissionDenied` | the member agreed in the app, but Android's location permission for the app is refused or turned off |
 
 ### `UserStatus`
 

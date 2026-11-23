@@ -15,6 +15,7 @@
 3. [Orders](#orders)
 4. [Realtime Order Delivery](#realtime-order-delivery)
 5. [Availability](#availability)
+   - [Collection App Requirement](#collection-app-requirement)
 6. [Payment Accounts](#payment-accounts)
 7. [Recharge Requests](#recharge-requests)
 8. [Withdrawal Requests](#withdrawal-requests)
@@ -42,6 +43,16 @@ No authentication required.
   "password": "YourPassword123"
 }
 ```
+
+| Field | Rules |
+|---|---|
+| `client` | Optional. Which app is signing in: leave it out (or send `"Default"`) from the member app; the member's **Collection App** sends `"CollectionApp"`. Any other value is refused with `400`. |
+
+**One session per app.** A new sign-in replaces only the earlier session of the same app, so a member can stay signed in
+on the member app and on the Collection App at the same time. The tokens of a Collection App session carry the
+`client_app: "CollectionApp"` claim, and [refreshing](#refresh-token) keeps the session on its app. Only a Collection
+App session can act on deposits while the [Collection App requirement](#collection-app-requirement) applies to the
+member.
 
 **Response 200**
 ```json
@@ -173,7 +184,8 @@ GET /api/member/me
     ],
     "createdAt": "2026-01-15T09:00:00Z",
     "withdrawalRequestsEnabled": false,
-    "receiveLimitsRequired": false
+    "receiveLimitsRequired": false,
+    "collectionAppRequired": false
   }
 }
 ```
@@ -181,6 +193,11 @@ GET /api/member/me
 `activePaymentAccounts` are the accounts deposits are paid into now, each with its [receive limits](#receive-limits)
 and what counts against them (`receiveUsage`). `receiveLimitsRequired` is `true` while one of them has no limits yet
 (`limitsSetAt: null`): turning Collections on asks for them first (see [Update Availability](#update-availability)).
+
+`collectionAppRequired` is `true` while the [Collection App requirement](#collection-app-requirement) applies to the
+member (the platform setting is on and the member is not exempt). When the member taps a deposit's Confirm / Reject /
+Mark as payment received, the app tells them to use the Collection App instead of sending the request. The Collections
+switch is not affected. Absent from an older API: treat as `false`.
 
 `withdrawalRequestsEnabled` says whether the member can send a new [withdrawal request](#withdrawal-requests). It is
 `false` for now (server setting `MemberFinance:WithdrawalRequestsEnabled`). While it is `false`, or absent, the app
@@ -511,6 +528,7 @@ customer, the TID was refused: nothing is settled and the order is unchanged, so
   - `code: "order.tidAlreadyUsed"` — `This TID is already used on another completed withdrawal. Check the TID and try again.`
   - `code: "order.tidMatchesIncomingPayment"` — `This TID belongs to a payment you received, not one you sent. Enter the TID of your payout.`
 
+**Response 422** — `code: "member.collectionAppRequired"`: a **deposit** while the [Collection App requirement](#collection-app-requirement) applies to the member and the request does not come from the Collection App. Nothing changes. Withdrawals are never refused for it.  
 **Response 403** — Order belongs to a different member  
 **Response 404** — Order not found
 
@@ -576,6 +594,7 @@ Only this endpoint enforces the threshold, against the server's clock: a client 
 **Response 400** — `reason` is missing  
 **Response 409** — `Reject` is not in the order's `allowedActions` (the message says why, e.g. "This order is already completed.")  
 **Response 422** — `code: "order.rejectNotYetAllowed"`: too early to reject this deposit. The message gives the time left in whole minutes, rounded up — "You can reject this order in 7 minutes." (or "…in less than a minute.")  
+**Response 422** — `code: "member.collectionAppRequired"`: a **deposit** while the [Collection App requirement](#collection-app-requirement) applies to the member and the request does not come from the Collection App. Nothing changes. Withdrawals are never refused for it.  
 **Response 403** — Order belongs to a different member  
 **Response 404** — Order not found
 
@@ -621,6 +640,7 @@ assigned to them. Repeating a completion that went through answers 200 with the 
 **Response 403** — Order belongs to a different member, or the deposit was not rejected by this member (an administrator's rejection is left to administrators)  
 **Response 409** — Not a rejected deposit (a withdrawal, another status), the completion window has passed, the feature is off, the order already has wallet postings (needs an administrator), or the member's balance is being updated by another order (retry)  
 **Response 422** — The member's free balance does not cover the deposit (the message gives the figures)  
+**Response 422** — `code: "member.collectionAppRequired"`: a **deposit** while the [Collection App requirement](#collection-app-requirement) applies to the member and the request does not come from the Collection App. Nothing changes. Withdrawals are never refused for it.  
 **Response 404** — Order not found
 
 ---
@@ -1013,6 +1033,35 @@ All fields are optional — send only the ones you want to change; a field left 
 ```
 
 **Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account
+
+---
+
+### Collection App Requirement
+
+An administrator can require members to use the **Collection App** for deposits (platform setting *Require the
+Collection App for deposits*, `members.collectionAppRequired`, off by default; Settings → Order rules). An
+administrator can exempt single members from it (member profile → Edit → Collection App). While it applies to a member
+(`collectionAppRequired: true` on [their profile](#get-my-profile)):
+
+| | From the member app | From the Collection App |
+|---|---|---|
+| Confirm, reject, cancel or complete a rejected **deposit** | refused, `422 member.collectionAppRequired` | allowed |
+| Switch Collections (`collectionsEnabled`) on or off | allowed | allowed |
+| Anything on a **withdrawal**, Receive Withdrawals | allowed | allowed |
+
+A request comes "from the Collection App" when its access token is from a [sign-in](#login-member) with
+`client: "CollectionApp"`. Deposits are then confirmed by the Collection App (from the member's wallet statement) and
+rejected by the system when they are not paid in time (the platform's auto-reject rule). The member keeps switching
+Collections on and off in the member app. Administrators are never restricted.
+
+The member app tells the member to use the Collection App when they tap a deposit action, before sending anything. An
+app that sends the request anyway gets the `422`, whose `error` says to use the Collection App.
+
+**Collection App sign-in and confirming a deposit**
+```
+POST /api/auth/member-login           { "phoneNumber": "03001234567", "password": "…", "client": "CollectionApp" }
+POST /api/member/orders/{id}/confirm  (with that session's token)
+```
 
 ---
 
@@ -1704,7 +1753,7 @@ All error responses use this shape:
 | 403         | Authenticated but not authorized (wrong owner) |
 | 404         | Resource not found                             |
 | 409         | The action is not allowed in the current state (order already decided, account on hold or in use) |
-| 422         | Unprocessable — precondition not met           |
+| 422         | Unprocessable — precondition not met (e.g. `member.collectionAppRequired`, see [Collection App Requirement](#collection-app-requirement)) |
 | 500         | Internal server error                          |
 
 ---

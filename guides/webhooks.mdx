@@ -37,7 +37,7 @@ An order can send more than one event. Every time a final order changes again, y
 | `eventType` | Sent when | `status` in payload |
 |-------------|-----------|---------------------|
 | `order.completed` | The order settled: the member confirmed receipt of a deposit or the payout of a withdrawal, or C2C operations resolved the order as confirmed. **Safe to fulfil.** | `Completed` (or legacy `Confirmed`) |
-| `order.failed` | The order ended without settlement: the member rejected it, the checkout link expired, no member could be assigned in time, or it was cancelled (by C2C operations or automatically) | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto` |
+| `order.failed` | The order ended without settlement: the member rejected it, a deposit was not completed within 60 minutes of assignment (rejected automatically), the checkout link expired, no member could be assigned in time, or it was cancelled (by C2C operations or automatically) | `Rejected`, `Expired`, `CancelledTimeout`, `Cancelled` or `CancelledAuto` |
 
 Example `reason` values on `order.failed`: `Checkout expired before payment`, `Failed to assign the order to a member. Please check with support.` (no member could be assigned: within about 10 seconds of the customer submitting their account for a deposit, within 120 minutes for a withdrawal), the member's rejection reason, or the resolution note from C2C operations.
 

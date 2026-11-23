@@ -51,8 +51,8 @@ No authentication required.
 **One session per app.** A new sign-in replaces only the earlier session of the same app, so a member can stay signed in
 on the member app and on the Collection App at the same time. The tokens of a Collection App session carry the
 `client_app: "CollectionApp"` claim, and [refreshing](#refresh-token) keeps the session on its app. Only a Collection
-App session can switch deposits on, or act on deposits, while the
-[Collection App requirement](#collection-app-requirement) applies to the member.
+App session can act on deposits while the [Collection App requirement](#collection-app-requirement) applies to the
+member.
 
 **Response 200**
 ```json
@@ -170,20 +170,34 @@ GET /api/member/me
         "accountHolderName": "Ali Hassan",
         "isActive": true,
         "status": "Approved",
-        "accountTypeLabel": "JazzCash Account Number"
+        "accountTypeLabel": "JazzCash Account Number",
+        "orderLimit": 20,
+        "amountLimit": 50000.00,
+        "limitPeriod": "Daily",
+        "limitsSetAt": "2026-11-10T09:00:00+05:00",
+        "receiveUsage": {
+          "ordersReceived": 12, "amountReceived": 30000.00, "ordersOpen": 2, "amountOpen": 5000.00,
+          "ordersLeft": 6, "amountLeft": 15000.00, "isFull": false,
+          "periodStartedAt": "2026-11-10T00:00:00+05:00", "resetsAt": "2026-11-11T00:00:00+05:00"
+        }
       }
     ],
     "createdAt": "2026-01-15T09:00:00Z",
     "withdrawalRequestsEnabled": false,
+    "receiveLimitsRequired": false,
     "collectionAppRequired": false
   }
 }
 ```
 
+`activePaymentAccounts` are the accounts deposits are paid into now, each with its [receive limits](#receive-limits)
+and what counts against them (`receiveUsage`). `receiveLimitsRequired` is `true` while one of them has no limits yet
+(`limitsSetAt: null`): turning Collections on asks for them first (see [Update Availability](#update-availability)).
+
 `collectionAppRequired` is `true` while the [Collection App requirement](#collection-app-requirement) applies to the
-member (the platform setting is on and the member is not exempt). The app then locks the Collections switch while it is
-off and shows a deposit's Confirm / Reject / Mark as payment received buttons disabled, each with a hint. Absent from an
-older API: treat as `false`.
+member (the platform setting is on and the member is not exempt). When the member taps a deposit's Confirm / Reject /
+Mark as payment received, the app tells them to use the Collection App instead of sending the request. The Collections
+switch is not affected. Absent from an older API: treat as `false`.
 
 `withdrawalRequestsEnabled` says whether the member can send a new [withdrawal request](#withdrawal-requests). It is
 `false` for now (server setting `MemberFinance:WithdrawalRequestsEnabled`). While it is `false`, or absent, the app
@@ -222,6 +236,7 @@ GET /api/member/orders
 | `orderType`| string   | —       | `Deposit` or `Withdrawal`                |
 | `fromDate` | datetime | —       | Filter from date (ISO 8601)              |
 | `toDate`   | datetime | —       | Filter to date (ISO 8601)                |
+| `paymentAccountId` | uuid | —   | Only the orders on one of the member's own accounts: deposits paid into it, withdrawals paid out of it |
 
 The list is the member's **whole** order history — every type and status — newest first (`createdAt` descending,
 ties broken by `id`, so the order never changes between requests). Search, filters and paging all run on the server
@@ -234,6 +249,14 @@ after the last order the member already has, so orders created in the meantime n
 following a cursor; when they change, start again without one. To show new orders, fetch the first page again.
 `page` still works for a numbered list. An invalid `cursor` is refused with `400`.
 
+**The account a deposit was paid into.** Every deposit with a member carries the member's own receiving account —
+`paymentAccountId`, `accountNumber`, `accountHolderName`, `accountTypeLabel`, `walletType`, `bankName` — so a list can
+show which of the member's accounts (and so which wallet app) to check for the payment. The member app shows it in full
+under **Received in** on every deposit card. Filtering by stage uses `statuses`: the app offers "Waiting for customer
+payment" (`AwaitingCustomerPayment`), "Needs your confirmation" (`AwaitingMemberConfirmation`), "Needs your payment"
+(`AwaitingMemberPayout`), "Needs your action / overdue" (`Assigned`, `Frozen`), "Under admin review" (`ManualReview`),
+"Completed", "Rejected" and "Cancelled or expired", besides whole outcomes.
+
 **Search** matches part of any of these, ignoring case: `orderReference`, `txnRefNo`, `memberTxnRefNo`,
 `customerSubmittedTxnRef`, `payerIdentifier` (the customer's account of a deposit) and `customerAccountNumber` (the
 customer's account of a withdrawal). It never matches the merchant's own reference or customer id, and never another
@@ -243,6 +266,7 @@ member's orders.
 ```
 GET /api/member/orders?statuses=Assigned&statuses=Frozen&page=1&pageSize=10
 GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20
+GET /api/member/orders?orderType=Deposit&statuses=AwaitingCustomerPayment&paymentAccountId=8c6b1c3a-...
 GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20&cursor=NjM5MjU1NzM...
 ```
 
@@ -264,7 +288,9 @@ GET /api/member/orders?search=ORD-2026&orderType=Withdrawal&pageSize=20&cursor=N
         "status": "AwaitingCustomerPayment",
         "currency": "PKR",
         "amount": 5000.00,
-        "commissionAmount": 125.00,
+        "commissionAmount": null,
+        "commissionRate": 0.025,
+        "expectedCommission": 125.00,
         "orderReference": "ORD-20260607-001",
         "txnRefNo": null,
         "memberTxnRefNo": null,
@@ -333,11 +359,13 @@ member's own account.
 | `accountTypeLabel` | Display name of the member's account type, e.g. `"JazzCash Till ID"`, `"JazzCash QR"`, `"Direct Bank Account"` (`null` when there is no account yet) |
 | `accountNumber` | The member's account number or Till ID. **QR deposit**: the wallet number / Till ID the member registered for that QR code. **Bank Account deposit**: the member's bank account number or IBAN |
 | `bankName` | The bank of the member's own account when it is a bank account (`walletType: BankAccount`), e.g. `"Meezan Bank"`; `null` for every wallet account and while the order has no member account |
-| `commissionAmount` | The member's reward; `null` until it is known |
+| `commissionAmount` | The commission paid to the member when the order completed; `null` until then |
+| `commissionRate` | The member's commission rate for this order (e.g. `0.025` = 2.5%), fixed when the order is assigned to them from their day/night rate for the order type (the shift the order was created in). If the order is reassigned, it is set again from the new member's rate. `null` while the order has no member |
+| `expectedCommission` | **The member's reward**: what completing the order earns, `amount × commissionRate` rounded to 4 decimal places — the same amount completion pays. Once the order completed it equals `commissionAmount`. `null` while the order has no member. Show this as the order's reward; an older API without it only had `commissionAmount` |
 | `merchantName` | The merchant the order came from |
 | `cancellationReason` | Why the order was rejected / cancelled, when it was |
 | `rejectAvailableAt` | When the member may first reject the order: a **deposit** can only be rejected once the admin's *deposit reject threshold* (default 10 minutes) has passed since `assignedAt`. Absent when rejecting is not delayed (withdrawals, a threshold of 0) or `Reject` is not in `allowedActions`. Informational only: the app never compares it with the phone's clock, which may be set wrong. Tapping Reject always opens the reason sheet and the API decides — a rejection that is too early is refused with 422 `order.rejectNotYetAllowed` and the time left, which the app shows before closing the sheet. Confirming is never delayed |
-| `completeRejectedUntil` | **Rejected deposit the member rejected themselves**: until when they may still complete it, because the customer's payment arrived late — see [Complete Rejected Deposit](#complete-rejected-deposit). Absent for every other order: withdrawals, a deposit an administrator rejected, one rejected longer ago than the admin's completion window (default 72 hours), or when administrators turned the feature off. Show the **Mark as payment received** action only while it is present and in the future; the API decides either way |
+| `completeRejectedUntil` | **Rejected deposit the member rejected themselves, or that was auto-rejected while assigned to them**: until when they may still complete it, because the customer's payment arrived late — see [Complete Rejected Deposit](#complete-rejected-deposit). Absent for every other order: withdrawals, a deposit an administrator rejected, one rejected longer ago than the admin's completion window (default 72 hours), or when administrators turned the feature off. Show the **Mark as payment received** action only while it is present and in the future; the API decides either way |
 | `proofKind` | **Deposit**: what the customer of this order gave so the member can find the payment — [`OrderProofKind`](#orderproofkind). `PayerWalletNumber` on every new deposit, whatever the payment method; `TransactionIdDigits` and `PayerIbanLastFour` only appear on orders created before this release. `null` for withdrawals and while the order has no member account. See [What the customer submits](#what-the-customer-submits-proofkind) |
 | `payerIdentifier` | **Deposit**: the wallet account number the customer *says* they pay from — their JazzCash account for a JazzCash method, their Easypaisa account for an Easypaisa method, and on a Bank Account deposit the JazzCash or Easypaisa wallet they send the bank transfer from (`03XXXXXXXXX`). The customer gives it before the order is assigned, so it is there from the moment the order reaches the member. A claim, **not verification**, and **never a transaction ID**. `null` for withdrawals. (On orders created before this release it can be the last 4 digits of the customer's Easypaisa IBAN — `PayerIbanLastFour` — or `null`) |
 | `payerIdentifierKind` | `PayerWalletNumber` \| `null` — what `payerIdentifier` is (`PayerIbanLastFour` only on orders created before this release) |
@@ -380,10 +408,14 @@ checkout page, **before** a member is assigned. A deposit therefore reaches the 
 No transaction ID and no IBAN digits are asked for. The member **confirms** when a payment of the order's amount
 arrives from that account, or **rejects** if it does not. The customer reports nothing after paying: the checkout
 page no longer has an "I have sent the payment" button, so the order stays `AwaitingCustomerPayment` until the member
-decides. It does not expire: the customer may already have paid into your account, so it stays with you until you
-confirm or reject it, however long that takes. `AwaitingMemberConfirmation` and the `OrderSubmitted` event remain for an order whose payment was
-reported as sent (now only when an administrator sets that status): the same two actions apply, and such an order is
-escalated to `ManualReview` instead when the member does not decide within their confirmation window.
+decides. It does not expire with the checkout link, but it is **auto-rejected** when it is still open after the admin's
+*Auto-reject open deposits after* time (Admin portal → Settings → Order Rules, default 60 minutes after `assignedAt`;
+0 turns it off): it becomes `Rejected` with `cancellationReason` `Auto-rejected: not completed within 60 minutes of
+assignment.`, the member receives `OrderExpired`, and the merchant is told it failed. If the payment arrives after that,
+the member completes it as a [rejected deposit](#complete-rejected-deposit). `AwaitingMemberConfirmation` and the
+`OrderSubmitted` event remain for an order whose payment was reported as sent (now only when an administrator sets that
+status): the same two actions and the same auto-reject time apply. While auto-reject is on, such an order is no longer
+escalated to `ManualReview` when the member does not decide within their confirmation window; with it off, it is.
 
 `TransactionIdDigits` (the last digits of a transaction ID, in `customerSubmittedTxnRef`) and `PayerIbanLastFour` (the
 last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
@@ -581,7 +613,8 @@ it settles the order exactly like a confirmation (the member's balance is debite
 merchant is credited the amount less its fee, on the terms fixed for the order) and sends the merchant
 `order.completed`. The rejection stays in the order's history.
 
-Only while the order's `completeRejectedUntil` is present: a deposit the **calling member rejected themselves**, within
+Only while the order's `completeRejectedUntil` is present: a deposit the **calling member rejected themselves**, or one
+the system **auto-rejected** while it was assigned to them (it was still open after the admin's auto-reject time), within
 the admin's completion window (Admin portal → Settings → Order Rules, *Complete rejected deposits within*, default 72
 hours after the rejection; 0 turns it off). Never a withdrawal, never another status, never a deposit an administrator
 rejected.
@@ -729,7 +762,9 @@ A member is eligible when they are **online** (`isOnline`, set through `PATCH /a
 (`withdrawalsEnabled`) for a withdrawal — have
 a wallet account for the order (below), the order currency matches theirs, the amount is within their pay limit
 (deposits) / draw limit (withdrawals), they have a free slot under their concurrent-order limit, and — for
-deposits — their **available wallet balance covers the amount**.
+deposits — their **available wallet balance covers the amount** and one of their receiving accounts for the order
+**has room for it under its [receive limits](#receive-limits)**. The account shown to the customer is picked at random
+among the member's accounts with room, so an account that is full is passed over while another one still takes deposits.
 
 **Fair distribution.** Orders are given to the eligible online members in rotation: the member who has waited longest
 since their last order gets the next one, and members level on that are picked at random. How many orders a member
@@ -758,8 +793,9 @@ with `OrderAssigned`, in status `AwaitingCustomerPayment`, with the customer's a
 member is free, the checkout keeps looking for 10 seconds and the order then fails without ever reaching a member.
 Once an account has been shown the order never moves — the customer may already have paid — and the member can
 confirm or reject it even after going offline. The member confirms when the payment arrives from the customer's
-account, or rejects it if the payment does not arrive. It never expires, and `expiresAt` is `null`: the checkout link
-keeps working for the customer, and the order stays with the member until they decide.
+account, or rejects it if the payment does not arrive. It never expires with the checkout link, and `expiresAt` is
+`null`: the checkout link keeps working for the customer, and the order stays with the member until they decide or the
+admin's auto-reject time (default 60 minutes after assignment) rejects it.
 
 **Going offline.** Only online members with Collections enabled are assigned new orders. Online / Collections
 change **only** through `PATCH /api/member/availability` (or an admin) — closing the app, losing the network or
@@ -799,11 +835,11 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 |---|---|---|
 | `OrderAssigned` | A new order (deposit or withdrawal) was assigned to you — also when one is reassigned *to* you. A deposit arrives ready to act on: `AwaitingCustomerPayment`, with the customer's account in `payerIdentifier` | full order payload (below) |
 | `OrderSubmitted` | The deposit's payment was reported as sent: it is now `AwaitingMemberConfirmation`. The checkout page no longer sends this report, so do not wait for the event — a deposit is confirmed from `OrderAssigned` on | full order payload |
-| `OrderExpired` | Your order expired or was escalated for manual review | `{ "orderId": "…" }` |
+| `OrderExpired` | Your order expired, was auto-rejected (a deposit still open after the auto-reject time), or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
-| `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
-| `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
+| `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount", "commissionRate", "expectedCommission" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
+| `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts, or you switched one yourself in any app. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
 
 **`PaymentAccountUpdated` payload**
 ```json
@@ -820,9 +856,13 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 ```
 
 `change` is `Approved`, `Rejected`, `Held`, `HoldReleased`, `Deactivated`, `Reactivated`, `SwitchedOn` or
-`SwitchedOff` (the last two only when an admin flips the switch — the member's own toggle is not echoed). `message`
+`SwitchedOff` (the last two when an admin flips the switch, sent for each account the change touched), or
+`SwitchedOnByMember` / `SwitchedOffByMember` when the member switched the account themselves, in any app. A member's
+switch-on sends one event, for the account switched on; the accounts it switched off get none, so reload the whole list
+on every `PaymentAccountUpdated`. Treat an unknown `change` as "the account was updated". `message`
 is the fixed member-safe hold text while the account is on hold. On this event the app refreshes
-`GET /api/member/payment-accounts` and shows a toast such as "Your JazzCash Till ID ending 6443 was approved".
+`GET /api/member/payment-accounts` and shows a toast such as "Your JazzCash Till ID ending 6443 was approved"; it shows
+no toast for `SwitchedOnByMember` / `SwitchedOffByMember`, which the member made themselves.
 
 **Full order payload**
 ```json
@@ -833,6 +873,8 @@ is the fixed member-safe hold text while the account is on hold. On this event t
   "status": "AwaitingCustomerPayment",
   "amount": 1000.0,
   "currency": "PKR",
+  "commissionRate": 0.015,
+  "expectedCommission": 15.0,
   "paymentAccountId": "…",
   "paymentAccountWalletType": "JazzCash",
   "paymentAccountNumber": "03001234567",
@@ -930,6 +972,37 @@ you can still confirm, reject or report them.
 
 > **Note**: Turning either switch on requires at least one approved payment account.
 
+**Turning Collections on asks for the receive limits.** Every account deposits are paid into (`canReceiveDeposits`)
+must have its [receive limits](#receive-limits) set before Collections can be turned on. Send them in the same request
+as `receiveLimits` (the same items as [Set Receive Limits](#set-receive-limits)); an account whose limits were set
+before need not be sent again. Without them the request is refused with `422` and code `member.receiveLimitsRequired`,
+and nothing changes. Members who already had Collections on when limits were introduced stay on.
+
+The member app asks for the limits every time Collections is turned on, starting from what was saved last (a new
+account: empty fields, period **Daily**), and sends them with the switch.
+
+> **Collection App and other clients.** A client that turns Collections on but does not show the limits form must
+> check `receiveLimitsRequired` on [Get My Profile](#get-my-profile) first, and handle `422` `member.receiveLimitsRequired`:
+> tell the member to **open the C2C Members app → Account Management → Receive limits** (or turn Collections on there),
+> set the order limit and amount limit of each receiving account, and then try again. Never send limits on the member's
+> behalf.
+
+**Request** — turn Collections on, with the receive limits of each receiving account
+```json
+{
+  "isOnline": true,
+  "collectionsEnabled": true,
+  "receiveLimits": [
+    { "paymentAccountId": "8c6b1c3a-...", "orderLimit": 20, "amountLimit": 50000, "period": "Daily" }
+  ]
+}
+```
+
+**Response 422** — a receiving account has no receive limits yet
+```json
+{ "error": "Set the order limit and amount limit of each of your receiving accounts before enabling collections (0 means no limit).", "code": "member.receiveLimitsRequired" }
+```
+
 **Request** — start receiving withdrawal orders
 ```json
 {
@@ -961,10 +1034,6 @@ All fields are optional — send only the ones you want to change; a field left 
 
 **Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account
 
-**Response 422** — `code: "member.collectionAppRequired"`: switching `collectionsEnabled` on from the member app while
-the [Collection App requirement](#collection-app-requirement) applies. Switching it **off** is never refused, and
-`isOnline: true` alone is accepted for a member whose Collections was left enabled.
-
 ---
 
 ### Collection App Requirement
@@ -976,20 +1045,22 @@ administrator can exempt single members from it (member profile → Edit → Col
 
 | | From the member app | From the Collection App |
 |---|---|---|
-| Switch Collections (`collectionsEnabled`) **on** | refused, `422 member.collectionAppRequired` | allowed |
-| Switch Collections **off** | allowed | allowed |
 | Confirm, reject, cancel or complete a rejected **deposit** | refused, `422 member.collectionAppRequired` | allowed |
+| Switch Collections (`collectionsEnabled`) on or off | allowed | allowed |
 | Anything on a **withdrawal**, Receive Withdrawals | allowed | allowed |
 
 A request comes "from the Collection App" when its access token is from a [sign-in](#login-member) with
 `client: "CollectionApp"`. Deposits are then confirmed by the Collection App (from the member's wallet statement) and
-rejected by the system when they are not paid in time (the platform's auto-reject rule). Members who already had
-Collections on when the requirement was turned on keep it on. Administrators are never restricted.
+rejected by the system when they are not paid in time (the platform's auto-reject rule). The member keeps switching
+Collections on and off in the member app. Administrators are never restricted.
 
-**Collection App sign-in and switching deposits on**
+The member app tells the member to use the Collection App when they tap a deposit action, before sending anything. An
+app that sends the request anyway gets the `422`, whose `error` says to use the Collection App.
+
+**Collection App sign-in and confirming a deposit**
 ```
-POST /api/auth/member-login        { "phoneNumber": "03001234567", "password": "…", "client": "CollectionApp" }
-PATCH /api/member/availability     { "isOnline": true, "collectionsEnabled": true }   (with that session's token)
+POST /api/auth/member-login           { "phoneNumber": "03001234567", "password": "…", "client": "CollectionApp" }
+POST /api/member/orders/{id}/confirm  (with that session's token)
 ```
 
 ---
@@ -1056,7 +1127,22 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
   "totalOrdersProcessed": 47,
   "lastOrderDate": "2026-06-06T18:30:00Z",
   "createdAt": "2026-01-15T09:00:00Z",
-  "updatedAt": "2026-01-16T10:00:00Z"
+  "updatedAt": "2026-01-16T10:00:00Z",
+  "orderLimit": 20,
+  "amountLimit": 50000.00,
+  "limitPeriod": "Daily",
+  "limitsSetAt": "2026-11-10T09:00:00+05:00",
+  "receiveUsage": {
+    "ordersReceived": 12,
+    "amountReceived": 30000.00,
+    "ordersOpen": 2,
+    "amountOpen": 5000.00,
+    "ordersLeft": 6,
+    "amountLeft": 15000.00,
+    "isFull": false,
+    "periodStartedAt": "2026-11-10T00:00:00+05:00",
+    "resetsAt": "2026-11-11T00:00:00+05:00"
+  }
 }
 ```
 
@@ -1078,6 +1164,9 @@ Every new or amended account is `Pending` until an admin approves it. Approval d
 | `canFundWithdrawals` | Whether it can pay out withdrawals at all (approved, not on hold). Which withdrawals it can pay depends on the customer's provider — see [List Payout Source Accounts](#list-payout-source-accounts) |
 | `isOnHold` / `holdMessage` | An admin placed the account on hold; `holdMessage` is the fixed member-safe text to show verbatim (`null` when not held). The admin's internal reason is never sent to the member app |
 | `rejectionReason` / `deactivationReason` | The admin's reason, for the member to read |
+| `orderLimit` / `amountLimit` / `limitPeriod` | The account's [receive limits](#receive-limits): at most `orderLimit` deposits and `amountLimit` of money per [`ReceiveLimitPeriod`](#receivelimitperiod). `0` = no limit |
+| `limitsSetAt` | When the member last saved the limits; `null` until they have (switching the account or Collections on asks for them first) |
+| `receiveUsage` | What counts against the limits now — see [Receive limits](#receive-limits). Filled by the account lists; `null` on a just-created account |
 
 Clients show `effectiveStatus` and use `canReceiveDeposits` / `canFundWithdrawals` as given — they never work
 eligibility out from `status` and `isActive`.
@@ -1208,7 +1297,10 @@ MemberId is derived from JWT — do not send it in the body.
   "provider": "Easypaisa",
   "accountType": "TillId",
   "accountNumber": "764310",
-  "accountHolderName": "Ali Hassan"
+  "accountHolderName": "Ali Hassan",
+  "orderLimit": 20,
+  "amountLimit": 50000,
+  "limitPeriod": "Daily"
 }
 ```
 
@@ -1241,6 +1333,7 @@ MemberId is derived from JWT — do not send it in the body.
 | `accountNumber` | The identifier. **Account number**: 11 digits `03XXXXXXXXX` (`+92…` / `92…` forms and spaces/dashes are normalised). **Till ID**: 4–12 digits. **QR**: the wallet number (`03XXXXXXXXX`, normalised the same way) **or** the Till ID (4–12 digits) the QR code belongs to. **Bank account**: the bank account number or IBAN, 8–34 letters and digits (spaces/dashes are removed) |
 | `accountHolderName` | Required, at most 200 characters. For a bank account: the account title |
 | `bankName` | **Bank account only — required.** The name of the bank the account is with, e.g. `Meezan Bank`, at most 100 characters. Ignored for every other type |
+| `orderLimit` / `amountLimit` / `limitPeriod` | The new account's [receive limits](#receive-limits) (`0` = no limit; period `Daily` when left out). The member app always asks for them. Left out (older apps), the account has no limits yet and asks for them before it is switched on. Ignored by [Update Payment Account](#update-payment-account) |
 | `qrImageBase64` | **`Qr` only — required when adding.** The QR code image as base64 (a `data:image/…;base64,` prefix is accepted; the app sends the bare base64). JPEG, PNG or WebP, at most 5 MB, at least 200×200 px. Sending it with any other `accountType` is a 400 |
 
 (`walletType` alone is still accepted from older app versions.)
@@ -1350,9 +1443,86 @@ PUT /api/member/payment-accounts/{id}/toggle-status
 
 The member's own switch. Switching off stops new deposits; the account can still fund withdrawals.
 
+Only **one receiving account per member** may be switched on, across all wallet types. Switching an account on
+switches the member's other non-archived accounts off in the same database transaction; switching one off never
+switches another on. Simultaneous requests from different apps or devices (Member App, Collection App) and admins are
+serialized per member. Admin switches and reactivation use the same rule; releasing a hold on an enabled approved
+account also resolves any legacy conflict. Approval, payout balances and withdrawal eligibility of the other accounts
+are unchanged: every approved account that is not on hold can still send withdrawal payments. Deposit instructions
+already shown to customers stay valid and are audited when their account is switched off.
+
+After a successful toggle, reload the **whole** account list (`GET /api/member/payment-accounts`); do not just update
+the tapped switch locally. The change is also pushed to the member's connected apps as
+`PaymentAccountUpdated` with `change` `SwitchedOnByMember` or `SwitchedOffByMember`
+(one event, for the account the member switched), so a Collection App and the Member App stay in step. Before switching
+an account on while another one is on, the Member App asks the member to confirm, naming the account that will be
+switched off.
+
+A member may still have more than one account switched on from before this rule. Reads never change that: the member
+selects the account to keep, and switching on an account that is already on (`isActive: true`) switches the others
+off. The Member App shows such a member a "Receive deposits only here" action on each receiving account.
+
 **Response 200**  
 **Response 400** — The account is not `Approved`  
-**Response 409** — Switching **on** an account that is on hold (the hold message)
+**Response 409** — Switching **on** an account that is on hold (the hold message)  
+**Response 422** — Switching **on** an account whose receive limits were never set: code `member.receiveLimitsRequired`. Set them with [Set Receive Limits](#set-receive-limits), then switch it on. (The app asks for them first, then switches the account on.)
+
+---
+
+### Receive limits
+
+Each account deposits are paid into has two limits the member sets, counted per period:
+
+| Limit | Meaning |
+|---|---|
+| `orderLimit` | The most deposits the account may receive in one period. `0` = no limit |
+| `amountLimit` | The most money the account may receive in one period. `0` = no limit |
+| `limitPeriod` | When the count starts again: `Daily` (from 00:00 PKT, the default), `Monthly` (from the 1st, 00:00 PKT) or `Never` (counts from when the member chose it, until they change it) |
+
+**What counts** (`receiveUsage`): the deposits into the account **completed** in the current period
+(`ordersReceived` / `amountReceived`) plus its **open** deposits (`ordersOpen` / `amountOpen`) — an open deposit holds its
+room so two deposits in flight can never take the account over its limit. As with the member's balance, a deposit whose
+customer has not reported paying once the unpaid-deposit hold has passed stops holding room (it counts again if it
+completes). Withdrawals paid out of the account never count. `ordersLeft` / `amountLeft` are what is left (`null` for a
+limit of `0`); `isFull` is `true` when the order limit is reached or nothing is left of the amount limit; `resetsAt` is
+when the count starts again (`null` for `Never`).
+
+**At assignment** a deposit is only given to an account with room for it: below its order limit, and the deposit's
+amount fits in what is left of its amount limit. A member whose receiving accounts for the customer's method are all
+full gets no deposit of that method; admins see the reason ("Account order limit reached" / "Account amount limit
+reached") in the order's diagnosis. Money that already arrived is never refused — it just counts.
+
+### Set Receive Limits
+
+```
+PUT /api/member/payment-accounts/receive-limits
+```
+
+**Auth**: Bearer JWT required.
+
+Sets the receive limits of some of the member's own accounts. It never changes the account's approval and works while
+the account has orders in progress — it only decides which **new** deposits it gets. Choosing another period starts
+its count afresh; changing only the limits keeps what was counted. Every change is in the account's audit trail.
+
+**Request**
+```json
+{
+  "limits": [
+    { "paymentAccountId": "8c6b1c3a-...", "orderLimit": 20, "amountLimit": 50000, "period": "Daily" },
+    { "paymentAccountId": "460c3924-...", "orderLimit": 0, "amountLimit": 0, "period": "Monthly" }
+  ]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `paymentAccountId` | One of the member's own accounts (not removed); each at most once; at most 50 |
+| `orderLimit` | Whole number, `0`–`100000` (`0` = no limit) |
+| `amountLimit` | `0`–`1000000000` (`0` = no limit) |
+| `period` | [`ReceiveLimitPeriod`](#receivelimitperiod); `Daily` when left out |
+
+**Response 200** — the member's accounts as they are afterwards, each with its `receiveUsage`  
+**Response 400** — a limit out of range, or an account that is not the member's
 
 ---
 
@@ -1741,6 +1911,14 @@ Backend-computed from `status`, `isActive`, the hold and archival. This is what 
 | `Archived`           | Removed (not returned to the member app) | no | no           |
 
 The two right-hand columns are for orientation only — read `canReceiveDeposits` / `canFundWithdrawals`.
+
+### `ReceiveLimitPeriod`
+
+| Value | The count of an account's [receive limits](#receive-limits) starts again |
+|---|---|
+| `Daily` | every day at 00:00 PKT (the default) |
+| `Monthly` | on the 1st of every month at 00:00 PKT |
+| `Never` | never: it counts from when the member chose this period until they change it |
 
 ### `UserStatus`
 

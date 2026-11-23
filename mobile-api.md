@@ -397,8 +397,9 @@ decides. It does not expire with the checkout link, but it is **auto-rejected** 
 assignment.`, the member receives `OrderExpired`, and the merchant is told it failed. If the payment arrives after that,
 the member completes it as a [rejected deposit](#complete-rejected-deposit). `AwaitingMemberConfirmation` and the
 `OrderSubmitted` event remain for an order whose payment was reported as sent (now only when an administrator sets that
-status): the same two actions and the same auto-reject time apply. While auto-reject is on, such an order is no longer
-escalated to `ManualReview` when the member does not decide within their confirmation window; with it off, it is.
+status): the same two actions and the same auto-reject time apply. Such an order has no confirmation deadline
+(`expiresAt` is `null`): it waits for its member until the auto-reject time and is never escalated to `ManualReview`
+for running out of time. With auto-reject set to 0 it waits until the member or an administrator decides.
 
 `TransactionIdDigits` (the last digits of a transaction ID, in `customerSubmittedTxnRef`) and `PayerIbanLastFour` (the
 last 4 digits of the customer's Easypaisa IBAN, in `payerIdentifier`) only appear on orders created before this
@@ -741,14 +742,16 @@ A member is eligible when they are **online** (`isOnline`, set through `PATCH /a
 **switch for the order's type on** — **Collections** (`collectionsEnabled`) for a deposit, **Receive Withdrawals**
 (`withdrawalsEnabled`) for a withdrawal — have
 a wallet account for the order (below), the order currency matches theirs, the amount is within their pay limit
-(deposits) / draw limit (withdrawals), they have a free slot under their concurrent-order limit, and — for
+(deposits) / draw limit (withdrawals), they were given fewer orders in the last 60 seconds than the platform's
+**Orders per member per minute** (Admin portal → Settings → Order Rules, default 5; deposits and withdrawals together —
+how many orders they already hold does not matter), and — for
 deposits — their **available wallet balance covers the amount** and one of their receiving accounts for the order
 **has room for it under its [receive limits](#receive-limits)**. The account shown to the customer is picked at random
 among the member's accounts with room, so an account that is full is passed over while another one still takes deposits.
 
 **Fair distribution.** Orders are given to the eligible online members in rotation: the member who has waited longest
 since their last order gets the next one, and members level on that are picked at random. How many orders a member
-has open no longer decides who is next — only whether they are still under their concurrent-order limit.
+has open does not decide who is next — only whether they are still under the per-minute limit.
 
 **Transfer routes — money only moves within one provider.**
 

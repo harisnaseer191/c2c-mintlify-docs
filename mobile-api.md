@@ -15,13 +15,14 @@
 3. [Orders](#orders)
 4. [Realtime Order Delivery](#realtime-order-delivery)
 5. [Availability](#availability)
-6. [Payment Accounts](#payment-accounts)
-7. [Recharge Requests](#recharge-requests)
-8. [Withdrawal Requests](#withdrawal-requests)
-9. [Platform Accounts (Public)](#platform-accounts)
-10. [Error Format](#error-format)
-11. [Pagination Format](#pagination-format)
-12. [Enum Reference](#enum-reference)
+6. [Collection App](#collection-app)
+7. [Payment Accounts](#payment-accounts)
+8. [Recharge Requests](#recharge-requests)
+9. [Withdrawal Requests](#withdrawal-requests)
+10. [Platform Accounts (Public)](#platform-accounts)
+11. [Error Format](#error-format)
+12. [Pagination Format](#pagination-format)
+13. [Enum Reference](#enum-reference)
 
 ---
 
@@ -1016,6 +1017,81 @@ All fields are optional — send only the ones you want to change; a field left 
 ```
 
 **Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account
+
+---
+
+## Collection App
+
+### Report Scan Timing
+
+```
+POST /api/member/collection-app/scan-report
+```
+
+**Auth**: Bearer JWT of a **Collection App** session (signed in with `"client": "CollectionApp"`). Any other session gets
+`403` with code `collectionApp.sessionRequired`. The member is always the signed-in one.
+
+The Collection App reports whether it is monitoring and how long each scan of the wallet history took. Support sees it per
+member and phone on the admin portal's **Collection Devices** page and on each deposit's timing panel. It is diagnostics
+only: it never creates, matches or confirms a payment and carries no TIDs, amounts or payer numbers.
+
+**When to send.** About every 5 minutes while monitoring runs or is paused, even with no passes, so a paused phone is not
+taken for a silent one. Send at once when the state changes. A device that says it is running or paused but has not
+reported for 15 minutes is shown as *not reporting*.
+
+**Sequence and retries.** `sequence` starts at 1 on an installation and grows by one per report. Keep one report pending
+and resend it **unchanged** until it is answered. A sequence that was already applied is answered `200` with
+`"duplicate": true` and is not counted again. `409` with code `collectionApp.scanReportConflict` means another copy of the
+same report was being stored at that moment: send it again. `400` means the report is malformed: drop it.
+
+**Request**
+```json
+{
+  "installationId": "3f2b8c7e-5d41-4a7b-9b0e-2c6a1f9d8e10",
+  "sequence": 128,
+  "device": { "manufacturer": "samsung", "model": "SM-A155F", "androidSdk": 35, "appVersion": "1.22.22", "appBuild": 92 },
+  "state": "Paused",
+  "stateReason": "PHONE_LOCKED",
+  "stateSince": "2026-11-24T21:04:10Z",
+  "resumeAt": "2026-11-24T21:05:10Z",
+  "consecutiveFailures": 0,
+  "passes": [
+    {
+      "paymentAccountId": "8c6b1c3a-0d2e-4f51-9a37-6b1e2d4c5f60",
+      "startedAt": "2026-11-24T21:02:31Z",
+      "durationMs": 41800,
+      "outcome": "Completed",
+      "reconciliation": false,
+      "receiptsRead": 3,
+      "newReceipts": 1
+    }
+  ]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `installationId` | A UUID the app generates once per installation (a reinstall or cleared data is a new device) |
+| `sequence` | Greater than 0; one more than the previous report from this installation |
+| `device` | `manufacturer`, `model` (≤ 128 chars), `appVersion` (≤ 64), `androidSdk` (1–100), `appBuild` (≥ 0) |
+| `state` | `Running`, `Paused` (the app will try again by itself) or `Stopped` (needs the member) |
+| `stateReason` | Optional upper-case code, ≤ 40 chars: e.g. `PHONE_LOCKED`, `SCANNER_DISCONNECTED`, `WALLET_LAYOUT_UNSUPPORTED`, `MEMBER_STOPPED`, `SESSION_EXPIRED`, `ACCOUNT_CHANGED`, `GAVE_UP`, `RECEIPT_CONFLICT` |
+| `stateSince`, `resumeAt` | UTC times by the phone's clock; `resumeAt` only while `Paused` |
+| `consecutiveFailures` | Failed scan attempts in a row since the last completed scan |
+| `passes` | At most 200. `paymentAccountId` must be one of the member's payment accounts; `durationMs` 0–7,200,000; `outcome` `Completed`, `Failed` or `Cancelled`; `reconciliation` true for the periodic re-read of the last hour; `newReceipts` ≤ `receiptsRead` ≤ 10,000 |
+
+A pass on an account that is not the member's, started more than 7 days ago, or more than 10 minutes in the future is
+skipped and counted in `rejectedPasses`; the rest of the report is stored.
+
+**Response 200**
+```json
+{ "data": { "sequence": 128, "stored": true, "duplicate": false, "acceptedPasses": 1, "rejectedPasses": 0 } }
+```
+
+**Response 403** — not a Collection App session
+```json
+{ "error": "Scan reports are accepted from the collection app only.", "code": "collectionApp.sessionRequired" }
+```
 
 ---
 

@@ -195,9 +195,10 @@ and what counts against them (`receiveUsage`). `receiveLimitsRequired` is `true`
 (`limitsSetAt: null`): turning Collections on asks for them first (see [Update Availability](#update-availability)).
 
 `collectionAppRequired` is `true` while the [Collection App requirement](#collection-app-requirement) applies to the
-member (the platform setting is on and the member is not exempt). When the member taps a deposit's Confirm / Reject /
-Mark as payment received, the app tells them to use the Collection App instead of sending the request. The Collections
-switch is not affected. Absent from an older API: treat as `false`.
+member (the platform setting is on and the member is not exempt). When the member taps the Collections switch (on or
+off) or a deposit's Confirm / Reject / Mark as payment received, the member app tells them to use the Collection App
+instead of sending the request. Receive Withdrawals and receive limits are not affected. Absent from an older API:
+treat as `false`. The app learns a change of the setting on its next profile read.
 
 `withdrawalRequestsEnabled` says whether the member can send a new [withdrawal request](#withdrawal-requests). It is
 `false` for now (server setting `MemberFinance:WithdrawalRequestsEnabled`). While it is `false`, or absent, the app
@@ -839,7 +840,8 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
 | `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount", "commissionRate", "expectedCommission" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
-| `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts, or you switched one yourself in any app. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
+| `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts, or you switched one or set its receive limits yourself in any app. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
+| `MemberAvailabilityUpdated` | Your online status or order switches (Collections, Receive Withdrawals) changed — in the member app, the Collection App or by an admin. **Live only**, like `PaymentAccountUpdated` | `{ "isOnline": true, "collectionsEnabled": true, "withdrawalsEnabled": false, "source": "CollectionApp" }` |
 
 **`PaymentAccountUpdated` payload**
 ```json
@@ -857,12 +859,20 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 
 `change` is `Approved`, `Rejected`, `Held`, `HoldReleased`, `Deactivated`, `Reactivated`, `SwitchedOn` or
 `SwitchedOff` (the last two when an admin flips the switch, sent for each account the change touched), or
-`SwitchedOnByMember` / `SwitchedOffByMember` when the member switched the account themselves, in any app. A member's
+`SwitchedOnByMember` / `SwitchedOffByMember` when the member switched the account themselves, in any app, or
+`ReceiveLimitsSetByMember` when the member set its [receive limits](#receive-limits) in any app (one event per account
+set, from [Set Receive Limits](#set-receive-limits) or with [Update Availability](#update-availability)). A member's
 switch-on sends one event, for the account switched on; the accounts it switched off get none, so reload the whole list
 on every `PaymentAccountUpdated`. Treat an unknown `change` as "the account was updated". `message`
 is the fixed member-safe hold text while the account is on hold. On this event the app refreshes
 `GET /api/member/payment-accounts` and shows a toast such as "Your JazzCash Till ID ending 6443 was approved"; it shows
-no toast for `SwitchedOnByMember` / `SwitchedOffByMember`, which the member made themselves.
+no toast for `SwitchedOnByMember` / `SwitchedOffByMember` / `ReceiveLimitsSetByMember`, which the member made themselves.
+
+**`MemberAvailabilityUpdated` payload** — the switches as they are now, and who changed them: `source` is `MemberApp`,
+`CollectionApp` or `Admin` (treat an unknown value like `Admin`). It is sent once for every change that is saved, and
+not when a request sends the switches as they already are. On this event an app updates its switches (or re-reads
+[its profile](#get-my-profile)); the member app shows "Collections was switched on in the Collection App." for a
+`CollectionApp` change and no toast for its own.
 
 **Full order payload**
 ```json
@@ -981,11 +991,20 @@ and nothing changes. Members who already had Collections on when limits were int
 The member app asks for the limits every time Collections is turned on, starting from what was saved last (a new
 account: empty fields, period **Daily**), and sends them with the switch.
 
-> **Collection App and other clients.** A client that turns Collections on but does not show the limits form must
-> check `receiveLimitsRequired` on [Get My Profile](#get-my-profile) first, and handle `422` `member.receiveLimitsRequired`:
-> tell the member to **open the C2C Members app → Account Management → Receive limits** (or turn Collections on there),
-> set the order limit and amount limit of each receiving account, and then try again. Never send limits on the member's
-> behalf.
+The Collection App does the same: when `receiveLimitsRequired` is `true` on [Get My Profile](#get-my-profile) (or the
+request is refused with `member.receiveLimitsRequired`), it shows the limits form for the receiving account and sends
+the limits the member entered with the switch. Never send limits on the member's behalf.
+
+**While the [Collection App requirement](#collection-app-requirement) applies**, Collections is switched from the
+Collection App only. A request from the member app that would switch it is refused with `422` and code
+`member.collectionAppRequired` before anything else is checked, and nothing changes. "Switching" means: the member
+would start or stop being given deposits (online with Collections on) — which includes going online or offline while
+Collections is on — or Collections would be turned on while offline. Turning Receive Withdrawals on or off, and sending
+the switches as they already are, are not refused.
+
+Every change that is saved is pushed to every app the member is signed in on as
+[`MemberAvailabilityUpdated`](#order-hub-signalr), so the member app and the Collection App always show the same
+switches.
 
 **Request** — turn Collections on, with the receive limits of each receiving account
 ```json
@@ -1034,6 +1053,11 @@ All fields are optional — send only the ones you want to change; a field left 
 
 **Response 422** — Cannot turn Collections or Receive Withdrawals on without an approved payment account
 
+**Response 422** — the member app switching Collections while the Collection App is required
+```json
+{ "error": "Collections is switched on and off in the Collection App. Open the Collection App to start or stop receiving deposit orders.", "code": "member.collectionAppRequired" }
+```
+
 ---
 
 ### Collection App Requirement
@@ -1046,20 +1070,25 @@ administrator can exempt single members from it (member profile → Edit → Col
 | | From the member app | From the Collection App |
 |---|---|---|
 | Confirm, reject, cancel or complete a rejected **deposit** | refused, `422 member.collectionAppRequired` | allowed |
-| Switch Collections (`collectionsEnabled`) on or off | allowed | allowed |
+| Switch Collections on or off ([Update Availability](#update-availability)), incl. going online/offline while it is on | refused, `422 member.collectionAppRequired` | allowed |
+| Set [receive limits](#set-receive-limits) | allowed | allowed |
 | Anything on a **withdrawal**, Receive Withdrawals | allowed | allowed |
 
 A request comes "from the Collection App" when its access token is from a [sign-in](#login-member) with
 `client: "CollectionApp"`. Deposits are then confirmed by the Collection App (from the member's wallet statement) and
-rejected by the system when they are not paid in time (the platform's auto-reject rule). The member keeps switching
-Collections on and off in the member app. Administrators are never restricted.
+rejected by the system when they are not paid in time (the platform's auto-reject rule). The member switches
+Collections on and off in the Collection App, which shows the receive limits form when they are needed. Administrators
+are never restricted. Turning the setting on does not switch anyone's Collections off; members who should start in the
+Collection App are switched off by an operator when the rule is rolled out.
 
-The member app tells the member to use the Collection App when they tap a deposit action, before sending anything. An
-app that sends the request anyway gets the `422`, whose `error` says to use the Collection App.
+The member app tells the member to use the Collection App when they tap the Collections switch or a deposit action,
+before sending anything. An app that sends the request anyway gets the `422`, whose `error` says to use the Collection
+App. When the rule is off, or the member is exempt, the member app switches Collections and handles deposits as before.
 
 **Collection App sign-in and confirming a deposit**
 ```
 POST /api/auth/member-login           { "phoneNumber": "03001234567", "password": "…", "client": "CollectionApp" }
+PATCH /api/member/availability        { "isOnline": true, "collectionsEnabled": true }   (with that session's token)
 POST /api/member/orders/{id}/confirm  (with that session's token)
 ```
 
@@ -1503,6 +1532,9 @@ PUT /api/member/payment-accounts/receive-limits
 Sets the receive limits of some of the member's own accounts. It never changes the account's approval and works while
 the account has orders in progress — it only decides which **new** deposits it gets. Choosing another period starts
 its count afresh; changing only the limits keeps what was counted. Every change is in the account's audit trail.
+Allowed from the member app and the Collection App, whether or not the
+[Collection App requirement](#collection-app-requirement) applies. Each account set is pushed to every app the member
+is signed in on as `PaymentAccountUpdated` with `change` `ReceiveLimitsSetByMember`, so both apps show the same limits.
 
 **Request**
 ```json

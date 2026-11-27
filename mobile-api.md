@@ -821,7 +821,7 @@ acknowledge it** (and do not de-duplicate by its id). `payload` is a JSON object
 | `OrderExpired` | Your order expired, was auto-rejected (a deposit still open after the auto-reject time), or was escalated for manual review | `{ "orderId": "…" }` |
 | `OrderReassigned` | The order was taken *away* from you and given to another member | `{ "orderId": "…" }` |
 | `PendingOrdersReminder` | You went offline / turned Collections off (or your last device disconnected) with orders still open | `{ "pendingCount": 2, "orders": [ { "orderId", "orderReference", "orderType", "status", "amount", "currency", "expiresAt" } ] }` |
-| `OrderClosedByAdmin` | An admin confirmed (and settled) or cancelled your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount", "commissionRate", "expectedCommission" }` — `status` is `Confirmed`, `Cancelled` or `CancelledAuto` |
+| `OrderClosedByAdmin` | An admin completed (and settled) or closed your order — it can no longer be confirmed or rejected | `{ "orderId", "orderReference", "orderType", "status", "amount", "currency", "commissionAmount", "commissionRate", "expectedCommission" }` — `status` is `Completed` (wallets settled) or a failure status (`Rejected`, `Cancelled`, `CancelledAuto`, `CancelledTimeout`, `Expired`); notifications sent before November 2026 may carry the legacy `Confirmed` |
 | `PaymentAccountUpdated` | An admin approved, rejected, held, released, deactivated, reactivated or switched one of your wallet accounts, or you switched one yourself in any app. **Live only: `id` is 0 and `orderId` is the empty GUID** — nothing to acknowledge, nothing is replayed | account payload (below) |
 
 **`PaymentAccountUpdated` payload**
@@ -1749,7 +1749,7 @@ All list endpoints return the same paginated envelope:
 | `ManualReview`               | With an admin: escalated (e.g. not confirmed in time) or reported as an abnormal payment. Do not pay it again |
 | `Assigned`                   | Legacy: assigned — awaiting confirmation                                    |
 | `Frozen`                     | Legacy: freeze time passed — still awaiting confirmation                    |
-| `Confirmed`                  | Legacy: confirmed (terminal)                                                |
+| `Confirmed`                  | Legacy: completed under the old flow (terminal, same as `Completed`). No longer produced; older orders may show it |
 | `Cancelled` / `CancelledAuto` / `CancelledTimeout` | Cancelled by member/admin, automatically, or timed out |
 
 ### `MemberOrderAction` (`allowedActions`)
